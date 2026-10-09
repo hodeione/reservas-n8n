@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Avisos } from '../../components/ui'
-import { ApiError, api, type DatosAdmin } from '../../lib/api'
+import { DemoBarra } from '../../components/Demo'
+import { ApiError, CLAVE_DEMO, DEMO, api, type DatosAdmin } from '../../lib/api'
 import { alClicar, useGuardado, useRuta, useTitulo } from '../../lib/util'
 import { Ajustes } from './Ajustes'
+import { Automatizaciones } from './Automatizaciones'
 import { CartaAdmin } from './CartaAdmin'
 import { EditorPlano } from './EditorPlano'
 import { Hoy } from './Hoy'
@@ -11,11 +13,12 @@ const PESTANAS = [
   { ruta: '/admin', texto: 'Reservas', icono: '📅' },
   { ruta: '/admin/plano', texto: 'Mesas', icono: '🪑' },
   { ruta: '/admin/carta', texto: 'Carta', icono: '🍽️' },
+  { ruta: '/admin/automatizaciones', texto: 'Automático', icono: '⚡' },
   { ruta: '/admin/ajustes', texto: 'Ajustes', icono: '⚙️' },
 ]
 
 export function Admin() {
-  const [clave, setClave] = useGuardado('admin-clave', '')
+  const [clave, setClave] = useGuardado('admin-clave', DEMO ? CLAVE_DEMO : '')
   const [datos, setDatos] = useState<DatosAdmin | null>(null)
   const [fecha, setFecha] = useState('')
   const [error, setError] = useState('')
@@ -75,6 +78,7 @@ export function Admin() {
   return (
     <Avisos>
       <div className="min-h-screen pb-24 sm:pb-10">
+        <DemoBarra />
         <header className="sticky top-0 z-30 border-b border-linea bg-papel/90 backdrop-blur-md">
           <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-2.5 sm:px-6">
             <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-tinta text-oro">☾</span>
@@ -98,7 +102,7 @@ export function Admin() {
               <a href="/" target="_blank" rel="noopener" className="rounded-full px-3 py-2 text-sm font-medium hover:bg-linea/60">
                 Ver la web ↗
               </a>
-              <button onClick={() => (setClave(''), setDatos(null))} className="rounded-full px-3 py-2 text-sm font-medium text-gris hover:bg-linea/60">
+              <button onClick={() => (setClave(''), setDatos(null))} className={`rounded-full px-3 py-2 text-sm font-medium text-gris hover:bg-linea/60 ${DEMO ? 'hidden' : ''}`}>
                 Salir
               </button>
             </div>
@@ -110,6 +114,8 @@ export function Admin() {
             <EditorPlano clave={clave} datos={datos} onGuardado={(mesas) => actualizar({ mesas })} />
           ) : ruta === '/admin/carta' ? (
             <CartaAdmin clave={clave} datos={datos} onGuardado={(carta) => actualizar({ carta })} />
+          ) : ruta === '/admin/automatizaciones' ? (
+            <Automatizaciones clave={clave} onCambio={() => cargar(fecha)} />
           ) : ruta === '/admin/ajustes' ? (
             <Ajustes clave={clave} datos={datos} onGuardado={(config) => actualizar({ config })} />
           ) : (
@@ -118,7 +124,7 @@ export function Admin() {
         </div>
 
         {/* Pestañas abajo en el móvil, al alcance del pulgar. */}
-        <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 border-t border-linea bg-papel/95 pb-[env(safe-area-inset-bottom)] backdrop-blur sm:hidden">
+        <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-linea bg-papel/95 pb-[env(safe-area-inset-bottom)] backdrop-blur sm:hidden">
           {PESTANAS.map((p) => (
             <a
               key={p.ruta}
@@ -182,7 +188,7 @@ function Acceso({ onEntrar, error }: { onEntrar: (c: string) => void; error: str
         <button disabled={probando} className="mt-5 w-full rounded-full bg-teja py-3.5 font-semibold text-white disabled:opacity-60">
           {probando ? 'Comprobando…' : 'Entrar'}
         </button>
-        <p className="mt-4 text-center text-xs text-gris">En este dispositivo no tendrás que volver a ponerla.</p>
+        <p className="mt-4 text-center text-xs text-gris">{DEMO ? 'En la demo, la clave es «demo».' : 'En este dispositivo no tendrás que volver a ponerla.'}</p>
       </form>
     </main>
   )

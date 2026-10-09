@@ -48,10 +48,11 @@ export const webhook = (name, method, path, responseMode = 'responseNode') => ({
 export const schedule = (name, rule) => ({ name, type: 'n8n-nodes-base.scheduleTrigger', typeVersion: 1.2, parameters: { rule: { interval: [rule] } } })
 
 /** Nodo Code con la librería común delante. */
-export const code = (name, body) => ({
+export const code = (name, body, extra = {}) => ({
   name,
   type: 'n8n-nodes-base.code',
   typeVersion: 2,
+  ...extra,
   parameters: { jsCode: `${LIB}\n/* ---- ${name} ---- */\n${body.trim()}\n` },
 })
 

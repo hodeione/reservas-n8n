@@ -48,7 +48,11 @@ const contenido = await n.ensureDataTable('contenido', [
   { name: 'clave', type: 'string' },
   { name: 'valor', type: 'string' },
 ])
-console.log('✓ Tablas: reservas, lista_espera y contenido')
+const clientes = await n.ensureDataTable('clientes', [
+  { name: 'telefono', type: 'string' },
+  { name: 'ultimo_aviso', type: 'string' },
+])
+console.log('✓ Tablas: reservas, lista_espera, contenido y clientes')
 
 // Datos de muestra (configuración, plano y carta) solo si aún no existen:
 // lo que el restaurante edite desde la administración nunca se sobrescribe.
@@ -106,6 +110,7 @@ for (const file of ficheros) {
     .replaceAll('__DT_RESERVAS__', reservas)
     .replaceAll('__DT_ESPERA__', espera)
     .replaceAll('__DT_CONTENIDO__', contenido)
+    .replaceAll('__DT_CLIENTES__', clientes)
     .replaceAll('__SMTP__', smtp.id)
   const wf = JSON.parse(raw)
   await n.upsertWorkflow(wf)

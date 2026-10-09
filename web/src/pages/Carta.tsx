@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react'
+import { Suspense, lazy, useMemo, useState } from 'react'
 import { Alergenos, FichaPlato, Imagen } from '../components/Sitio'
 import type { DatosWeb, Plato } from '../lib/api'
 import { ALERGENOS, euros, useTitulo } from '../lib/util'
 
 const FILTROS = ['vegetariano', 'vegano', 'sin gluten']
+const RealidadPlato = lazy(() => import('../components/RealidadPlato').then((m) => ({ default: m.RealidadPlato })))
 
 export function Carta({ d }: { d: DatosWeb }) {
   useTitulo(`Carta · ${d.restaurante.nombre}`)
@@ -11,6 +12,7 @@ export function Carta({ d }: { d: DatosWeb }) {
   const [etiqueta, setEtiqueta] = useState('')
   const [sin, setSin] = useState<string[]>([])
   const [verFiltros, setVerFiltros] = useState(false)
+  const [servir, setServir] = useState<string | null>(null)
 
   const platos = useMemo(
     () => d.carta.platos.filter((p) => (!etiqueta || p.etiquetas.includes(etiqueta)) && !sin.some((a) => p.alergenos.includes(a))),
@@ -26,6 +28,13 @@ export function Carta({ d }: { d: DatosWeb }) {
         <p className="text-xs font-bold uppercase tracking-[0.25em] text-teja">Carta digital</p>
         <h1 className="mt-2 font-serif text-5xl tracking-tight">{d.restaurante.nombre}</h1>
         <p className="mt-2 text-gris">Toca cualquier plato para verlo en 3D y sus alérgenos.</p>
+        <button onClick={() => setServir('')} className="mx-auto mt-5 flex items-center gap-3 rounded-2xl bg-tinta py-3 pl-3 pr-5 text-left text-crema shadow-lg">
+          <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-oro text-2xl">🍽️</span>
+          <span>
+            <span className="block font-semibold">Sírvelo en tu plato</span>
+            <span className="block text-xs text-crema/70">Apunta a un plato vacío y mira cómo llega cada plato</span>
+          </span>
+        </button>
       </div>
 
       {/* Secciones y filtros, siempre a mano */}
@@ -93,7 +102,12 @@ export function Carta({ d }: { d: DatosWeb }) {
         </section>
       ))}
       <p className="mt-10 text-center text-xs text-gris">Si tienes alguna alergia, avisa al personal antes de pedir. Los modelos 3D son orientativos.</p>
-      {ficha && <FichaPlato p={ficha} onCerrar={() => setFicha(null)} />}
+      {ficha && <FichaPlato p={ficha} onCerrar={() => setFicha(null)} onServir={(p) => (setFicha(null), setServir(p.id))} />}
+      {servir !== null && (
+        <Suspense fallback={<div className="fixed inset-0 z-[70] bg-black" />}>
+          <RealidadPlato platos={d.carta.platos} inicial={servir || undefined} onCerrar={() => setServir(null)} />
+        </Suspense>
+      )}
     </main>
   )
 }

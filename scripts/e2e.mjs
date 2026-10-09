@@ -12,7 +12,7 @@ const MAIL = 'http://localhost:8025/api/v1'
 const n = new N8n(N8N)
 await n.waitHealthy()
 await n.ensureOwnerAndLogin(env.N8N_ADMIN_EMAIL, env.N8N_ADMIN_PASSWORD)
-const T = { reservas: await n.ensureDataTable('reservas', []), espera: await n.ensureDataTable('lista_espera', []) }
+const T = { reservas: await n.ensureDataTable('reservas', []), espera: await n.ensureDataTable('lista_espera', []), clientes: await n.ensureDataTable('clientes', []) }
 
 let fallos = 0
 let pasos = 0
@@ -71,6 +71,7 @@ async function restaurar() {
 console.log(`Probando con fecha ${FECHA} (y lunes ${iso(lunes)} cerrado)\n`)
 await n.clearRows(T.reservas)
 await n.clearRows(T.espera)
+await n.clearRows(T.clientes)
 await fetch(`${MAIL}/messages`, { method: 'DELETE' })
 
 try {
@@ -221,7 +222,57 @@ try {
   ok(r.status === 401, 'Sin clave no se puede guardar')
   await restaurar()
 
-  console.log('9 · Recordatorio del día antes con confirmación de asistencia')
+  console.log('9 · Sala, cocina y clientes')
+  const insertar = (filas) => n.rest('POST', `/projects/${n.project.id}/data-tables/${T.reservas}/insert`, { data: filas, returnType: 'count' })
+  const base = { telefono: '', email: '', hora: '21:00', turno: 'cena', personas: 2, notas: '', mesa: 's1', origen: 'web', estado: 'llegada', asistencia: '', recordatorio: true, resena: true, ref: '' }
+  const haceDias = (k) => iso(new Date(d.getFullYear(), d.getMonth(), d.getDate() - k, 12))
+  await insertar([
+    { ...base, codigo: 'HIST01', token: 'h1', nombre: 'Ana López', telefono: '+34600112233', email: 'ana@ejemplo.com', fecha: haceDias(30) },
+    { ...base, codigo: 'HIST02', token: 'h2', nombre: 'Iñaki Etxeberria', telefono: '+34611223344', email: 'inaki@ejemplo.com', fecha: haceDias(120) },
+    { ...base, codigo: 'HIST03', token: 'h3', nombre: 'Iñaki Etxeberria', telefono: '+34611223344', email: 'inaki@ejemplo.com', fecha: haceDias(90) },
+    { ...base, codigo: 'HIST04', token: 'h4', nombre: 'Maite Ruiz', telefono: '+34622334455', email: 'maite@ejemplo.com', fecha: haceDias(100) },
+  ])
+  r = await http('GET', `/api/admin/datos?fecha=${FECHA}`, undefined, ADMIN)
+  ok(r.json?.clientes?.['+34600112233']?.visitas === 1, 'La administración sabe que Ana ya vino antes (cliente habitual)', r.json?.clientes)
+
+  // Terraza: Bruno está en la T2. Con poca lluvia no se mueve; con mucha, pasa al salón.
+  const esManana = FECHA === iso(new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1, 12))
+  if (esManana) {
+    await fetch(`${MAIL}/messages`, { method: 'DELETE' })
+    await http('POST', '/tareas/terraza', { clave: env.REST_CLAVE_PANEL, lluvia: 10 })
+    await sleep(3000)
+    ok((await fila((x) => x.nombre === 'Bruno Díaz')).mesa === 't2', 'Con un 10 % de lluvia la terraza sigue abierta')
+    await http('POST', '/tareas/terraza', { clave: env.REST_CLAVE_PANEL, lluvia: 90 })
+    const avisoBruno = await esperarMail((m) => m.To[0].Address === 'bruno@ejemplo.com' && m.Subject.includes('lluvia'))
+    const mesaBruno = (await fila((x) => x.nombre === 'Bruno Díaz')).mesa
+    ok(!!avisoBruno && mesaBruno.startsWith('s'), 'Con un 90 % de lluvia Bruno pasa a una mesa del salón y se le avisa', mesaBruno)
+    ok(!!(await esperarMail((m) => m.Subject.startsWith('Terraza cerrada por lluvia'))), 'El dueño recibe el resumen de la terraza')
+    await http('POST', '/tareas/terraza', { clave: 'mala', lluvia: 90 })
+  } else console.log('  · (prueba de terraza omitida: la fecha de prueba no es mañana)')
+
+  // Hoja de cocina: dos mesas hoy para la cena, una con alergia y otra con cumpleaños.
+  if (d.getHours() < 21) {
+    await fetch(`${MAIL}/messages`, { method: 'DELETE' })
+    const hoyIso = iso(d)
+    await http('POST', '/api/reservas', { nombre: 'Leire Alonso', telefono: '633000111', fecha: hoyIso, hora: '22:00', personas: 4, notas: 'Celíaca', origen: 'local' }, ADMIN)
+    await http('POST', '/api/reservas', { nombre: 'Jon Bilbao', telefono: '633000222', fecha: hoyIso, hora: '22:00', personas: 2, notas: 'Cumpleaños de Ane, sacar vela', origen: 'local' }, ADMIN)
+    await http('POST', '/tareas/cocina', { clave: env.REST_CLAVE_PANEL, turno: 'cena' })
+    const hoja = await esperarMail((m) => m.Subject.startsWith('Cocina cena'))
+    ok(!!hoja && hoja.Subject.includes('1 con alergias') && hoja.Subject.includes('1 celebraciones'), 'La cocina recibe la hoja de la cena con alergias y celebraciones', hoja?.Subject)
+  } else console.log('  · (hoja de cocina omitida: ya es tarde para reservar hoy)')
+
+  // Recuperar clientes: Iñaki vino dos veces y hace 90 días que no vuelve; Maite solo una vez.
+  await fetch(`${MAIL}/messages`, { method: 'DELETE' })
+  await http('POST', '/tareas/recuperar', { clave: env.REST_CLAVE_PANEL })
+  ok(!!(await esperarMail((m) => m.To[0].Address === 'inaki@ejemplo.com' && m.Subject.includes('echamos de menos'))), 'Iñaki, cliente habitual que no vuelve, recibe una invitación')
+  await sleep(1500)
+  ok(!(await mails()).some((m) => m.To[0].Address === 'maite@ejemplo.com'), 'Maite, que vino una sola vez, no recibe nada')
+  await fetch(`${MAIL}/messages`, { method: 'DELETE' })
+  await http('POST', '/tareas/recuperar', { clave: env.REST_CLAVE_PANEL })
+  await sleep(4000)
+  ok(!(await mails()).some((m) => m.To[0].Address === 'inaki@ejemplo.com'), 'No se le vuelve a escribir la semana siguiente')
+
+  console.log('10 · Recordatorio del día antes con confirmación de asistencia')
   await fetch(`${MAIL}/messages`, { method: 'DELETE' })
   await http('POST', '/tareas/recordatorios', { clave: env.REST_CLAVE_PANEL })
   ok(!!(await esperarMail((m) => m.To[0].Address === 'ana@ejemplo.com' && m.Subject.startsWith('Mañana te esperamos'))), 'Ana recibe el recordatorio')
@@ -234,7 +285,7 @@ try {
   r = await http('POST', '/reserva', new URLSearchParams({ t: anaAdm.token, accion: 'confirmar' }))
   ok(r.text.includes('Gracias por confirmar') && (await fila((x) => x.codigo === codigoAna)).asistencia === 'confirmada', 'Ana confirma asistencia con un clic')
 
-  console.log('10 · Informe diario y petición de reseña')
+  console.log('11 · Informe diario y petición de reseña')
   await http('POST', '/tareas/informe', { clave: env.REST_CLAVE_PANEL })
   const dueno = original.config.emailDueno || env.REST_EMAIL_DUENO
   ok(!!(await esperarMail((m) => m.To[0].Address === dueno && m.Subject.startsWith('Hoy:'))), 'El dueño recibe el informe diario')

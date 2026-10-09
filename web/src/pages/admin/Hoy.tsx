@@ -189,6 +189,16 @@ export function Hoy({ clave, datos, recargar }: Props) {
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="font-semibold">{r.nombre}</p>
                         <span className="text-sm text-gris">· {r.personas} pax</span>
+                        {(() => {
+                          const c = datos.clientes?.[r.telefono]
+                          return (
+                            <>
+                              {c && c.visitas > 0 && <span className="rounded-full bg-oro/25 px-2 py-0.5 text-[11px] font-bold" title={`Última visita: ${c.ultima}`}>★ {c.visitas + 1}ª visita</span>}
+                              {c && c.noShows > 0 && <span className="rounded-full bg-teja/15 px-2 py-0.5 text-[11px] font-bold text-teja-osc">⚠ {c.noShows} {c.noShows === 1 ? 'ausencia' : 'ausencias'}</span>}
+                              {/cumple|aniversari|celebra|sorpresa|vela/i.test(r.notas) && <span className="text-sm" title="Celebración">🎂</span>}
+                            </>
+                          )
+                        })()}
                         <span className={`ml-auto rounded-full px-2 py-0.5 text-xs font-bold ${e.clase}`}>{e.texto}</span>
                       </div>
                       <p className="mt-0.5 text-sm text-gris">

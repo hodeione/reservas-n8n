@@ -93,49 +93,14 @@ return [{ json: { ...v, fecha: v.datos.fecha || '0000-00-00', interno, origen } 
   f.add(dtGet('Reservas de esa fecha', 'RESERVAS', [['fecha', 'eq', '={{ $json.fecha }}']], once), [720, 640])
   f.add(code('Asignar mesa', `
 cargar('Contenido (reserva)')
-const val = $('Validar').first().json
-const no = (status, errores, extra = {}) => [{ json: { status, body: { ok: false, errores, ...extra } } }]
-if (!val.ok) return no(400, val.errores)
-const d = val.datos
-const rs = filas($input.all())
-const disp = disponibilidad(d.fecha, rs, d.personas, { ignorarAntelacion: val.interno })
-if (!disp.ok) return no(400, [disp.motivo])
-if (disp.cerrado) return no(409, [disp.motivo])
-const repetida = rs.find((r) => r.telefono === d.telefono && OCUPAN.includes(r.estado))
-if (repetida) return no(409, ['Ya tienes una reserva ese día a las ' + repetida.hora + ' (código ' + repetida.codigo + ').'])
-const hueco = disp.horas.find((h) => h.hora === d.hora)
-const sinSitio = (msg) => no(409, [msg], { alternativas: alternativas(disp, d.hora), lista_espera: !!(hueco && !hueco.pasada) })
-if (!hueco || !hueco.disponible) return sinSitio(hueco && hueco.pasada ? 'Esa hora ya no admite reservas online.' : 'No queda sitio a las ' + d.hora + ' para ' + d.personas + '.')
-const estados = estadoMesas(d.fecha, d.hora, d.personas, rs)
-const mesa = mejorMesa(estados, d.mesa || '')
-if (!mesa) {
-  const m = estados.find((x) => x.id === d.mesa)
-  return sinSitio(m ? (m.estado === 'no_cabe' ? 'La mesa ' + m.nombre + ' es para ' + (MESAS.find((x) => x.id === m.id) || {}).min + ' a ' + m.plazas + ' personas.' : 'La mesa ' + m.nombre + ' ya está reservada a esa hora.') : 'Esa mesa no existe.')
-}
-return [{ json: {
-  codigo: nuevoCodigo(), token: nuevoToken(), nombre: d.nombre, email: d.email, telefono: d.telefono,
-  fecha: d.fecha, hora: d.hora, turno: turnoDe(d.hora), personas: d.personas, notas: d.notas, mesa: mesa.id,
-  origen: val.origen, estado: 'confirmada', asistencia: '', recordatorio: false, resena: false, ref: '',
-} }]
+const r = asignarReserva($('Validar').first().json, filas($input.all()))
+return [{ json: r.error || r.fila }]
 `), [960, 640])
   f.add(ifExpr('¿Hay mesa?', '!!$json.codigo'), [1200, 640])
   f.add(dtInsert('Guardar reserva', 'RESERVAS'), [1440, 580])
   f.add(code('Preparar confirmación', `
 cargar('Contenido (reserva)')
-const r = $('Guardar reserva').first().json
-const body = { ok: true, codigo: r.codigo, fecha: r.fecha, fechaTexto: fechaLarga(r.fecha), hora: r.hora, personas: r.personas, nombre: r.nombre, email: r.email, mesa: nombreMesa(r.mesa), zona: (MESAS.find((m) => m.id === r.mesa) || {}).zona || '', gestionar: enlace(r.token) }
-const mapa = CFG.direccion ? 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(CFG.nombre + ' ' + CFG.direccion) : ''
-return [{ json: {
-  body,
-  para: r.email,
-  asunto: 'Reserva confirmada · ' + fechaLarga(r.fecha) + ' a las ' + r.hora,
-  html: emailHtml({
-    titulo: '¡Reserva confirmada!',
-    intro: 'Hola ' + esc(r.nombre.split(' ')[0]) + ', te esperamos. Si no puedes venir, cancélala con el botón para que otra persona aproveche la mesa.',
-    filas: datosReserva(r),
-    botones: [{ texto: 'Ver o cancelar', url: enlace(r.token) }].concat(mapa ? [{ texto: 'Cómo llegar', url: mapa, secundario: true }] : []),
-  }),
-} }]
+return [{ json: confirmacionReserva($('Guardar reserva').first().json) }]
 `), [1680, 580])
   f.add(ifExpr('¿Tiene email?', '!!$json.para'), [1920, 580])
   f.add(email('Email de confirmación'), [2160, 520])
@@ -165,16 +130,7 @@ return [{ json: { token: nuevoToken(), nombre: d.nombre, email: d.email, telefon
   f.add(dtInsert('Guardar en espera', 'ESPERA'), [960, 880])
   f.add(code('Preparar aviso de espera', `
 cargar('Contenido (espera)')
-const e = $('Guardar en espera').first().json
-return [{ json: {
-  body: { ok: true, fechaTexto: fechaLarga(e.fecha), email: e.email },
-  para: e.email,
-  asunto: 'Estás en la lista de espera · ' + fechaLarga(e.fecha),
-  html: emailHtml({
-    titulo: 'Estás en la lista de espera',
-    intro: 'Si se libera una mesa para ' + e.personas + ' el ' + esc(fechaLarga(e.fecha)) + ' en el turno de ' + e.turno + ', <b>te la reservaremos automáticamente</b> y te avisaremos por aquí. No tienes que hacer nada más.',
-  }),
-} }]
+return [{ json: avisoListaEspera($('Guardar en espera').first().json) }]
 `), [1200, 880])
   f.add(ifExpr('¿Email de espera?', '!!$json.para'), [1440, 880])
   f.add(email('Email de lista de espera'), [1680, 820])
@@ -287,17 +243,7 @@ if (!manual && ($now.hour < 10 || $now.hour > 21)) return []
 const recientes = $now.minus({ hours: 3 })
 return filas($input.all())
   .filter((r) => r.estado === 'confirmada' && !r.recordatorio && r.email && (manual || DateTime.fromISO(String(r.createdAt)) < recientes))
-  .map((r) => ({ json: {
-    token: r.token,
-    para: r.email,
-    asunto: 'Mañana te esperamos a las ' + r.hora + ' · ' + CFG.nombre,
-    html: emailHtml({
-      titulo: 'Te esperamos mañana',
-      intro: 'Hola ' + esc(r.nombre.split(' ')[0]) + ', te recordamos tu reserva. ¿Nos confirmas que venís? Si no podéis, cancélala y daremos la mesa a quien está en lista de espera.',
-      filas: datosReserva(r),
-      botones: [{ texto: 'Sí, allí estaremos', url: enlace(r.token) + '&accion=confirmar' }, { texto: 'No podemos ir', url: enlace(r.token) + '&accion=cancelar', secundario: true }],
-    }),
-  } }))
+  .map((r) => ({ json: recordatorio(r) }))
 `), [780, 100])
   f.add(email('Enviar recordatorio'), [1040, 100])
   f.add(dtSet('Marcar enviado', 'RESERVAS', [['token', 'eq', '={{ $("Preparar recordatorios").item.json.token }}']], { recordatorio: true }), [1300, 100])
@@ -320,17 +266,7 @@ if ($('Ejecutar ahora').isExecuted && ($('Ejecutar ahora').first().json.body || 
 if (!CFG.resena) return []
 return filas($input.all())
   .filter((r) => ['llegada', 'confirmada'].includes(r.estado) && r.email && !r.resena)
-  .map((r) => ({ json: {
-    token: r.token,
-    para: r.email,
-    asunto: '¿Qué tal ayer en ' + CFG.nombre + '?',
-    html: emailHtml({
-      titulo: 'Gracias por venir',
-      intro: 'Hola ' + esc(r.nombre.split(' ')[0]) + ', esperamos que disfrutarais. Tu opinión nos ayuda muchísimo a que más gente nos conozca. ¿Nos dejas una reseña? Es un minuto.',
-      botones: [{ texto: '★★★★★ Dejar reseña en Google', url: CFG.resena }],
-      pie: 'Si algo no estuvo a la altura, responde a este email: lo leemos personalmente.',
-    }),
-  } }))
+  .map((r) => ({ json: peticionResena(r) }))
 `), [780, 100])
   f.add(email('Enviar petición de reseña'), [1040, 100])
   f.add(dtSet('Marcar reseña pedida', 'RESERVAS', [['token', 'eq', '={{ $("Preparar reseñas").item.json.token }}']], { resena: true }), [1300, 100])
@@ -351,46 +287,13 @@ return filas($input.all())
   f.add(code('Asignar mesas', `
 cargar('Contenido')
 if ($('Sitio liberado').isExecuted && ($('Sitio liberado').first().json.body || {}).clave !== SECRETOS.clavePanel) return []
-const espera = filas($('Personas esperando').all()).sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))
-const reservas = filas($input.all())
-const salida = []
-for (const e of espera) {
-  if (reservas.some((r) => r.fecha === e.fecha && r.telefono === e.telefono && OCUPAN.includes(r.estado))) continue
-  const disp = disponibilidad(e.fecha, reservas, e.personas)
-  if (!disp.ok || disp.cerrado) continue
-  // Su hora preferida o, si no, la más cercana del mismo turno.
-  const opciones = disp.horas.filter((h) => h.disponible && h.turno === e.turno)
-    .sort((a, b) => Math.abs(minutos(a.hora) - minutos(e.hora)) - Math.abs(minutos(b.hora) - minutos(e.hora)))
-  let elegida = null
-  for (const h of opciones) {
-    const mesa = mejorMesa(estadoMesas(e.fecha, h.hora, e.personas, reservas))
-    if (mesa) { elegida = { hora: h.hora, mesa: mesa.id }; break }
-  }
-  if (!elegida) continue
-  const nueva = {
-    codigo: nuevoCodigo(), token: nuevoToken(), nombre: e.nombre, email: e.email, telefono: e.telefono,
-    fecha: e.fecha, hora: elegida.hora, turno: turnoDe(elegida.hora), personas: e.personas, notas: e.notas, mesa: elegida.mesa,
-    origen: 'espera', estado: 'confirmada', asistencia: '', recordatorio: false, resena: false, ref: String(e.id),
-  }
-  reservas.push(nueva) // el siguiente de la lista ya ve la mesa ocupada
-  salida.push({ json: nueva })
-}
-return salida
+return asignarListaEspera(filas($('Personas esperando').all()), filas($input.all())).map((json) => ({ json }))
 `), [1040, 100])
   f.add(dtInsert('Crear reserva', 'RESERVAS'), [1300, 100])
   f.add(dtSet('Sacar de la lista', 'ESPERA', [['id', 'eq', '={{ Number($json.ref) }}']], { estado: 'convertida' }), [1560, 100])
   f.add(code('Preparar aviso de mesa', `
 cargar('Contenido')
-return $('Crear reserva').all().filter((i) => i.json.email).map(({ json: r }) => ({ json: {
-  para: r.email,
-  asunto: '¡Tienes mesa! ' + fechaLarga(r.fecha) + ' a las ' + r.hora,
-  html: emailHtml({
-    titulo: '¡Se ha liberado una mesa para ti!',
-    intro: 'Hola ' + esc(r.nombre.split(' ')[0]) + ', estabas en nuestra lista de espera y <b>ya tienes la reserva hecha</b>. Si al final no te viene bien, cancélala con el botón.',
-    filas: datosReserva(r),
-    botones: [{ texto: 'Ver o cancelar', url: enlace(r.token) }],
-  }),
-} }))
+return $('Crear reserva').all().filter((i) => i.json.email).map(({ json: r }) => ({ json: avisoMesaLiberada(r) }))
 `), [1820, 100])
   f.add(email('Avisar al cliente'), [2080, 100])
   f.connect('Cada 30 minutos', 'Contenido')
@@ -408,6 +311,7 @@ return $('Crear reserva').all().filter((i) => i.json.email).map(({ json: r }) =>
   f.add(contenido('Contenido (admin)'), [240, 0])
   f.add(dtGet('Reservas del día (admin)', 'RESERVAS', [['fecha', 'eq', '={{ /^\\d{4}-\\d{2}-\\d{2}$/.test($("GET /api/admin/datos").first().json.query.fecha || "") ? $("GET /api/admin/datos").first().json.query.fecha : $now.toFormat("yyyy-MM-dd") }}']], once), [480, 0])
   f.add(dtGet('Lista de espera (admin)', 'ESPERA', [['estado', 'eq', 'esperando'], ['fecha', 'gte', HOY]], once), [720, 0])
+  f.add(dtGet('Historial (admin)', 'RESERVAS', [['fecha', 'gte', '={{ $now.minus({ days: 730 }).toFormat("yyyy-MM-dd") }}']], once), [840, -160])
   f.add(code('Datos de administración', `
 cargar('Contenido (admin)')
 const req = $('GET /api/admin/datos').first().json
@@ -422,12 +326,18 @@ const reservas = filas($('Reservas del día (admin)').all()).map((r) => ({
 return respuesta(200, {
   ok: true, fecha, hoy: hoy(), fechaTexto: fechaLarga(fecha), cerrado: diaCerrado(d),
   config: CFG, mesas: MESAS, carta: CARTA, reservas,
-  espera: filas($input.all()).map((e) => ({ nombre: e.nombre, telefono: e.telefono, fecha: e.fecha, hora: e.hora, personas: Number(e.personas) })),
+  espera: filas($('Lista de espera (admin)').all()).map((e) => ({ nombre: e.nombre, telefono: e.telefono, fecha: e.fecha, hora: e.hora, personas: Number(e.personas) })),
   opciones: { modelos: MODELOS_3D, alergenos: ALERGENOS, etiquetas: ETIQUETAS },
+  clientes: (() => {
+    const h = historialClientes(filas($('Historial (admin)').all()).filter((r) => r.fecha < fecha))
+    const out = {}
+    for (const r of reservas) if (h[r.telefono]) out[r.telefono] = { visitas: h[r.telefono].visitas, noShows: h[r.telefono].noShows, ultima: h[r.telefono].ultima }
+    return out
+  })(),
 })
 `), [960, 0])
   f.add(respondJson('Responder datos'), [1200, 0])
-  f.chain('GET /api/admin/datos', 'Contenido (admin)', 'Reservas del día (admin)', 'Lista de espera (admin)', 'Datos de administración', 'Responder datos')
+  f.chain('GET /api/admin/datos', 'Contenido (admin)', 'Reservas del día (admin)', 'Lista de espera (admin)', 'Historial (admin)', 'Datos de administración', 'Responder datos')
 
   // Guardar configuración, plano de mesas o carta (validados).
   f.add(webhook('POST /api/admin/guardar', 'POST', 'api/admin/guardar'), [0, 240])
@@ -501,33 +411,142 @@ cargar('Contenido')
 if ($('Ejecutar ahora').isExecuted && ($('Ejecutar ahora').first().json.body || {}).clave !== SECRETOS.clavePanel) return []
 const para = CFG.emailDueno || $env.REST_EMAIL_DUENO
 if (!para) return []
-const hoyR = filas($('Reservas de hoy').all())
-const ayer = filas($input.all())
-const act = hoyR.filter((r) => OCUPAN.includes(r.estado)).sort((a, b) => a.hora.localeCompare(b.hora))
-const plazas = mesasActivas().reduce((s, m) => s + Number(m.plazas), 0)
-const pax = (t) => act.filter((r) => r.turno === t).reduce((s, r) => s + Number(r.personas), 0)
-const cuenta = (e) => ayer.filter((r) => r.estado === e).length
-const tabla = act.length
-  ? '<table width="100%" style="border-collapse:collapse;font-size:14px">' + act.map((r) => '<tr><td style="padding:6px 0;border-bottom:1px solid #eee;width:56px"><b>' + r.hora + '</b></td><td style="padding:6px 0;border-bottom:1px solid #eee">' + esc(r.nombre) + ' · mesa ' + esc(nombreMesa(r.mesa)) + (r.asistencia === 'confirmada' ? ' ✓' : '') + (r.notas ? '<br><span style="color:#b45309">⚠ ' + esc(r.notas) + '</span>' : '') + '</td><td style="padding:6px 0;border-bottom:1px solid #eee;text-align:right"><b>' + r.personas + '</b> pax</td></tr>').join('') + '</table>'
-  : '<p>Hoy no hay reservas.</p>'
-const conNotas = act.filter((r) => r.notas).length
-return [{ json: {
-  para,
-  asunto: 'Hoy: ' + act.length + ' reservas · ' + (pax('comida') + pax('cena')) + ' comensales · ' + CFG.nombre,
-  html: emailHtml({
-    titulo: 'Resumen de ' + fechaLarga(hoy()),
-    intro: '<b>Comida:</b> ' + pax('comida') + ' comensales · <b>Cena:</b> ' + pax('cena') + ' comensales (' + plazas + ' plazas por turno)<br>' +
-      act.filter((r) => r.asistencia === 'confirmada').length + ' han confirmado asistencia' + (conNotas ? ' · <b style="color:#b45309">' + conNotas + ' con alergias o notas</b>' : '') +
-      '<br><br>' + tabla +
-      '<br><b>Ayer:</b> ' + cuenta('llegada') + ' llegadas · ' + cuenta('no_show') + ' no se presentaron · ' + cuenta('cancelada') + ' cancelaciones',
-    botones: [{ texto: 'Abrir la administración', url: SECRETOS.url + '/admin' }],
-  }),
-} }]
+return [{ json: { para, ...informeDiario(filas($('Reservas de hoy').all()), filas($input.all())) } }]
 `), [1040, 100])
   f.add(email('Enviar informe'), [1300, 100])
   f.connect('Cada día a las 9', 'Contenido')
   f.connect('Ejecutar ahora', 'Contenido')
   f.chain('Contenido', 'Reservas de hoy', 'Reservas de ayer (informe)', 'Preparar informe', 'Enviar informe')
+  flows.push(f)
+}
+
+
+/* ===================================================== 08 · Terraza según el tiempo */
+{
+  const f = new Flow('08 · Terraza según la previsión de lluvia')
+  f.add(schedule('A las 10 y a las 17', { field: 'cronExpression', expression: '0 10,17 * * *' }), [0, 0])
+  f.add(webhook('Ejecutar ahora', 'POST', 'tareas/terraza', 'onReceived'), [0, 200])
+  f.add(contenido('Contenido'), [260, 100])
+  f.add(dtGet('Reservas próximas', 'RESERVAS', [['fecha', 'gte', HOY]], once), [520, 100])
+  f.add(code('Consultar el tiempo y decidir', `
+cargar('Contenido')
+const manual = $('Ejecutar ahora').isExecuted
+const b = manual ? $('Ejecutar ahora').first().json.body || {} : {}
+if (manual && b.clave !== SECRETOS.clavePanel) return []
+if (!CFG.lluviaUmbral) return []
+// Previsión horaria de Open-Meteo (gratis y sin clave). En pruebas se puede forzar con «lluvia».
+let prob
+if (b.lluvia !== undefined) {
+  prob = {}
+  for (const f of [hoy(), hoy(1)]) for (const t of ['comida', 'cena']) prob[f + ' ' + t] = Number(b.lluvia)
+} else {
+  // Si el servicio del tiempo falla, no se toca nada: mejor no mover a nadie que moverlo sin motivo.
+  try {
+    const meteo = await this.helpers.httpRequest({ url: 'https://api.open-meteo.com/v1/forecast', qs: { latitude: CFG.lat, longitude: CFG.lng, hourly: 'precipitation_probability', timezone: 'Europe/Madrid', forecast_days: 2 }, json: true, timeout: 15000 })
+    prob = lluviaPorTurno(meteo)
+  } catch (e) {
+    return []
+  }
+}
+const reservas = filas($input.all())
+const salida = []
+const sinSitio = []
+for (const fecha of [hoy(), hoy(1)]) {
+  for (const turno of ['comida', 'cena']) {
+    const p = prob[fecha + ' ' + turno] || 0
+    if (p < CFG.lluviaUmbral) continue
+    for (const c of moverTerraza(fecha, turno, reservas)) {
+      if (!c.mesa) { sinSitio.push(c); continue }
+      const r = reservas.find((x) => x.token === c.token)
+      r.mesa = c.mesa
+      salida.push({ json: { token: c.token, mesa: c.mesa, prob: p, turno, fecha } })
+    }
+  }
+}
+if (!salida.length && !sinSitio.length) return []
+if (!salida.length) salida.push({ json: { token: '-', mesa: '', prob: 0, sinSitio } })
+salida[0].json.sinSitio = sinSitio
+return salida
+`), [780, 100])
+  f.add(dtSet('Cambiar de mesa', 'RESERVAS', [['token', 'eq', '={{ $json.token }}']], { mesa: '={{ $json.mesa }}' }), [1040, 100])
+  f.add(code('Preparar avisos', `
+cargar('Contenido')
+const cambios = $('Consultar el tiempo y decidir').all().map((i) => i.json).filter((c) => c.token !== '-')
+const sinSitio = ($('Consultar el tiempo y decidir').first().json.sinSitio) || []
+const reservas = filas($('Reservas próximas').all())
+const avisos = []
+for (const c of cambios) {
+  const r = reservas.find((x) => x.token === c.token)
+  if (r && r.email) avisos.push({ json: { para: r.email, asunto: 'Por la lluvia, te pasamos al salón · ' + CFG.nombre, html: emailCambioTerraza({ ...r, mesa: c.mesa }, c.prob) } })
+}
+const dueno = CFG.emailDueno || $env.REST_EMAIL_DUENO
+if (dueno) {
+  const linea = (c) => esc(fechaLarga(c.fecha)) + ' ' + esc(c.hora) + ' · ' + esc(c.nombre) + ' (' + c.personas + ' pax)'
+  avisos.push({ json: { para: dueno, asunto: 'Terraza cerrada por lluvia: ' + cambios.length + ' reservas movidas' + (sinSitio.length ? ', ' + sinSitio.length + ' sin sitio' : ''), html: emailHtml({
+    titulo: 'Previsión de lluvia: terraza recogida',
+    intro: cambios.length + ' reservas de terraza han pasado al salón y ya están avisadas.' + (sinSitio.length ? '<br><br><b style="color:#b4532a">Sin sitio dentro (llámalas):</b><br>' + sinSitio.map(linea).join('<br>') : ''),
+    botones: [{ texto: 'Ver la sala', url: SECRETOS.url + '/admin' }],
+  }) } })
+}
+return avisos
+`, once), [1300, 100])
+  f.add(email('Enviar avisos'), [1560, 100])
+  f.connect('A las 10 y a las 17', 'Contenido')
+  f.connect('Ejecutar ahora', 'Contenido')
+  f.chain('Contenido', 'Reservas próximas', 'Consultar el tiempo y decidir', 'Cambiar de mesa', 'Preparar avisos', 'Enviar avisos')
+  flows.push(f)
+}
+
+/* ===================================================== 09 · Hoja de cocina */
+{
+  const f = new Flow('09 · Hoja de cocina antes de cada servicio')
+  f.add(schedule('A las 12 y a las 19', { field: 'cronExpression', expression: '0 12,19 * * *' }), [0, 0])
+  f.add(webhook('Ejecutar ahora', 'POST', 'tareas/cocina', 'onReceived'), [0, 200])
+  f.add(contenido('Contenido'), [260, 100])
+  f.add(dtGet('Reservas de hoy', 'RESERVAS', [['fecha', 'eq', HOY]], once), [520, 100])
+  f.add(code('Preparar hoja de cocina', `
+cargar('Contenido')
+const manual = $('Ejecutar ahora').isExecuted
+const b = manual ? $('Ejecutar ahora').first().json.body || {} : {}
+if (manual && b.clave !== SECRETOS.clavePanel) return []
+const turno = ['comida', 'cena'].includes(b.turno) ? b.turno : $now.hour < 17 ? 'comida' : 'cena'
+const para = CFG.emailCocina || CFG.emailDueno || $env.REST_EMAIL_DUENO
+const h = hojaCocina(hoy(), turno, filas($input.all()))
+if (!para || !h.mesas) return []
+return [{ json: { para, asunto: 'Cocina ' + turno + ': ' + h.comensales + ' comensales' + (h.alergias ? ' · ' + h.alergias + ' con alergias' : '') + (h.celebraciones ? ' · ' + h.celebraciones + ' celebraciones' : ''), html: h.html } }]
+`), [780, 100])
+  f.add(email('Enviar a cocina'), [1040, 100])
+  f.connect('A las 12 y a las 19', 'Contenido')
+  f.connect('Ejecutar ahora', 'Contenido')
+  f.chain('Contenido', 'Reservas de hoy', 'Preparar hoja de cocina', 'Enviar a cocina')
+  flows.push(f)
+}
+
+/* ===================================================== 10 · Recuperar clientes */
+{
+  const f = new Flow('10 · Recuperar clientes que no vuelven')
+  f.add(schedule('Los lunes a las 11', { field: 'cronExpression', expression: '0 11 * * 1' }), [0, 0])
+  f.add(webhook('Ejecutar ahora', 'POST', 'tareas/recuperar', 'onReceived'), [0, 200])
+  f.add(contenido('Contenido'), [260, 100])
+  f.add(dtGet('Historial de reservas', 'RESERVAS', [['fecha', 'gte', '={{ $now.minus({ days: 730 }).toFormat("yyyy-MM-dd") }}']], once), [520, 100])
+  f.add(dtGet('Clientes avisados', 'CLIENTES', [], once), [780, 100])
+  f.add(code('Elegir clientes', `
+cargar('Contenido')
+if ($('Ejecutar ahora').isExecuted && ($('Ejecutar ahora').first().json.body || {}).clave !== SECRETOS.clavePanel) return []
+const avisados = {}
+for (const c of filas($input.all())) avisados[c.telefono] = c.ultimo_aviso
+return clientesARecuperar(filas($('Historial de reservas').all()), avisados, CFG.recuperarDias)
+  .slice(0, 100)
+  .map((c) => ({ json: { telefono: c.telefono, para: c.email, asunto: 'Te echamos de menos en ' + CFG.nombre, html: emailRecuperar(c) } }))
+`), [1040, 100])
+  f.add(email('Enviar invitación'), [1300, 100])
+  f.add(code('Marcar avisados', `
+return $('Elegir clientes').all().map((i) => ({ json: { telefono: i.json.telefono, ultimo_aviso: $now.toFormat('yyyy-MM-dd') } }))
+`, once), [1560, 100])
+  f.add(dtUpsert('Guardar aviso', 'CLIENTES', [['telefono', 'eq', '={{ $json.telefono }}']]), [1820, 100])
+  f.connect('Los lunes a las 11', 'Contenido')
+  f.connect('Ejecutar ahora', 'Contenido')
+  f.chain('Contenido', 'Historial de reservas', 'Clientes avisados', 'Elegir clientes', 'Enviar invitación', 'Marcar avisados', 'Guardar aviso')
   flows.push(f)
 }
 

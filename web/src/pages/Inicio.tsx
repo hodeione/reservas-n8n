@@ -1,8 +1,10 @@
-import { useState } from 'react'
+import { Suspense, lazy, useState } from 'react'
 import { FichaPlato, Imagen, Seccion, horario } from '../components/Sitio'
 import { Modelo3D } from '../components/Modelo3D'
 import type { DatosWeb, Plato } from '../lib/api'
 import { alClicar, euros, useTitulo } from '../lib/util'
+
+const RealidadPlato = lazy(() => import('../components/RealidadPlato').then((m) => ({ default: m.RealidadPlato })))
 
 export function Inicio({ d }: { d: DatosWeb }) {
   const r = d.restaurante
@@ -10,6 +12,7 @@ export function Inicio({ d }: { d: DatosWeb }) {
   const destacados = d.carta.platos.filter((p) => p.destacado)
   const estrella = destacados.find((p) => p.modelo) ?? d.carta.platos.find((p) => p.modelo)
   const [ficha, setFicha] = useState<Plato | null>(null)
+  const [servir, setServir] = useState<string | null>(null)
   const h = horario(r)
   const mapa = `https://www.openstreetmap.org/export/embed.html?bbox=${r.lng - 0.004}%2C${r.lat - 0.0025}%2C${r.lng + 0.004}%2C${r.lat + 0.0025}&layer=mapnik&marker=${r.lat}%2C${r.lng}`
 
@@ -96,7 +99,12 @@ export function Inicio({ d }: { d: DatosWeb }) {
         </div>
       </Seccion>
 
-      {ficha && <FichaPlato p={ficha} onCerrar={() => setFicha(null)} />}
+      {ficha && <FichaPlato p={ficha} onCerrar={() => setFicha(null)} onServir={(p) => (setFicha(null), setServir(p.id))} />}
+      {servir !== null && (
+        <Suspense fallback={<div className="fixed inset-0 z-[70] bg-black" />}>
+          <RealidadPlato platos={d.carta.platos} inicial={servir || undefined} onCerrar={() => setServir(null)} />
+        </Suspense>
+      )}
     </main>
   )
 }

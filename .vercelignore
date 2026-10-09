@@ -1,0 +1,6 @@
+backups
+workflows
+docs
+.env
+web/node_modules
+web/dist

@@ -1,0 +1,78 @@
+{
+ "tabla-ibericos": {
+  "diametro": 0.4,
+  "solo": false
+ },
+ "ostras": {
+  "diametro": 0.3,
+  "solo": false
+ },
+ "tortilla": {
+  "diametro": 0.27,
+  "solo": false
+ },
+ "tosta-salmon": {
+  "diametro": 0.26,
+  "solo": false
+ },
+ "ensalada": {
+  "diametro": 0.26,
+  "solo": false
+ },
+ "melon-jamon": {
+  "diametro": 0.29,
+  "solo": false
+ },
+ "pulpo": {
+  "diametro": 0.29,
+  "solo": false
+ },
+ "arroz-negro": {
+  "diametro": 0.42,
+  "solo": false
+ },
+ "chuleton": {
+  "diametro": 0.32,
+  "solo": false
+ },
+ "lubina": {
+  "diametro": 0.34,
+  "solo": false
+ },
+ "salmon": {
+  "diametro": 0.28,
+  "solo": false
+ },
+ "cordero": {
+  "diametro": 0.36,
+  "solo": false
+ },
+ "tartar": {
+  "diametro": 0.3,
+  "solo": false
+ },
+ "tarta-queso": {
+  "diametro": 0.33,
+  "solo": true
+ },
+ "tarta-chocolate": {
+  "diametro": 0.25,
+  "solo": false
+ },
+ "tarta-higos": {
+  "diametro": 0.29,
+  "solo": true
+ },
+ "tarta-frambuesa": {
+  "diametro": 0.27,
+  "solo": false
+ },
+ "tartaleta-limon": {
+  "diametro": 0.19,
+  "solo": true
+ },
+ "cafe-vienes": {
+  "diametro": 0.15,
+  "solo": false
+ }
+}

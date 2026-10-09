@@ -1,8 +1,10 @@
 import { Suspense, lazy, useEffect, useState } from 'react'
+import { DemoBarra, DemoBienvenida } from './components/Demo'
 import { Cabecera, Pie } from './components/Sitio'
 import { api, type DatosWeb } from './lib/api'
 import { alClicar, useRuta } from './lib/util'
 import { Carta } from './pages/Carta'
+import { Gestionar } from './pages/Gestionar'
 import { Inicio } from './pages/Inicio'
 import { Reservar } from './pages/Reservar'
 
@@ -21,6 +23,7 @@ export default function App() {
     return (
       <Suspense fallback={<Cargando />}>
         <Admin />
+        <DemoBienvenida />
       </Suspense>
     )
   }
@@ -50,9 +53,12 @@ function Publica({ ruta }: { ruta: string }) {
   }
   if (!d) return <Cargando />
 
-  const pagina = ruta === '/carta' ? <Carta d={d} /> : ruta === '/reservar' ? <Reservar d={d} /> : ruta === '/' ? <Inicio d={d} /> : <NoEncontrada />
+  const pagina =
+    ruta === '/carta' ? <Carta d={d} /> : ruta === '/reservar' ? <Reservar d={d} /> : ruta === '/' ? <Inicio d={d} /> : ruta === '/webhook/reserva' ? <Gestionar /> : <NoEncontrada />
   return (
     <>
+      <DemoBarra />
+      <DemoBienvenida />
       <Cabecera r={d.restaurante} />
       {pagina}
       <Pie r={d.restaurante} />

@@ -28,6 +28,9 @@ const POR_DEFECTO = {
   maxPersonas: 10,
   resena: $env.REST_URL_RESENA || '',
   emailDueno: $env.REST_EMAIL_DUENO || '',
+  emailCocina: '',
+  lluviaUmbral: 60,
+  recuperarDias: 60,
 }
 
 let CFG = { ...POR_DEFECTO }
@@ -257,7 +260,7 @@ function respuesta(status, body) {
 
 /* ----------------------------------------------------- validación de la administración */
 
-const MODELOS_3D = ['salad', 'skewer-vegetables', 'bowl-soup', 'fries', 'burger-cheese', 'pizza', 'meat-ribs', 'fish', 'meat-cooked', 'maki-salmon', 'sushi-salmon', 'cake', 'pancakes', 'ice-cream-cup', 'waffle', 'wine-red', 'glass-wine', 'cocktail', 'cup-coffee', 'croissant', 'taco', 'sandwich', 'pie', 'dim-sum', 'cupcake', 'chinese', 'pudding', 'sundae', 'soda-glass', 'mussel-open', 'egg-cooked']
+const MODELOS_3D = ['tabla-ibericos', 'ostras', 'tortilla', 'tosta-salmon', 'ensalada', 'melon-jamon', 'pulpo', 'arroz-negro', 'chuleton', 'lubina', 'salmon', 'cordero', 'tartar', 'tarta-queso', 'tarta-chocolate', 'tarta-higos', 'tarta-frambuesa', 'tartaleta-limon', 'cafe-vienes', 'salad', 'skewer-vegetables', 'bowl-soup', 'fries', 'burger-cheese', 'pizza', 'meat-ribs', 'fish', 'meat-cooked', 'maki-salmon', 'sushi-salmon', 'cake', 'pancakes', 'ice-cream-cup', 'waffle', 'wine-red', 'glass-wine', 'cocktail', 'cup-coffee', 'croissant', 'taco', 'sandwich', 'pie', 'dim-sum', 'cupcake', 'chinese', 'pudding', 'sundae', 'soda-glass', 'mussel-open', 'egg-cooked']
 /** Los 14 alérgenos de declaración obligatoria (Reglamento UE 1169/2011). */
 const ALERGENOS = ['gluten', 'crustaceos', 'huevo', 'pescado', 'cacahuetes', 'soja', 'lacteos', 'frutos_cascara', 'apio', 'mostaza', 'sesamo', 'sulfitos', 'altramuces', 'moluscos']
 const ETIQUETAS = ['vegetariano', 'vegano', 'sin gluten', 'picante', 'nuevo']
@@ -294,6 +297,9 @@ function validarConfig(v) {
     maxPersonas: entero(v.maxPersonas, 1, 60, 10),
     resena: esUrl(String(v.resena || '')) ? String(v.resena) : '',
     emailDueno: /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(v.emailDueno || '')) ? String(v.emailDueno).trim() : '',
+    emailCocina: /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(v.emailCocina || '')) ? String(v.emailCocina).trim() : '',
+    lluviaUmbral: entero(v.lluviaUmbral, 0, 100, 60),
+    recuperarDias: entero(v.recuperarDias, 0, 365, 60),
   }
   if (!c.horas.comida.length && !c.horas.cena.length) throw new Error('Añade al menos una hora de reserva.')
   return c
@@ -350,4 +356,294 @@ function validarCarta(v) {
     }
   })
   return { categorias, platos }
+}
+
+/* ----------------------------------------------------- automatizaciones de sala, cocina y clientes */
+
+const esTerraza = (m) => /terraza|exterior|fuera/i.test(String((m || {}).zona || ''))
+
+/**
+ * Probabilidad máxima de lluvia por fecha y turno a partir de la respuesta horaria de Open-Meteo
+ * (hourly.time y hourly.precipitation_probability), mirando las horas que dura cada turno.
+ */
+function lluviaPorTurno(meteo) {
+  const h = (meteo && meteo.hourly) || {}
+  const t = h.time || []
+  const p = h.precipitation_probability || []
+  const res = {}
+  for (const turno of ['comida', 'cena']) {
+    const horas = CFG.horas[turno] || []
+    if (!horas.length) continue
+    const ini = minutos(horas[0])
+    const fin = minutos(horas[horas.length - 1]) + (CFG.duracion[turno] || 90)
+    for (let i = 0; i < t.length; i++) {
+      const fecha = String(t[i]).slice(0, 10)
+      const m = minutos(String(t[i]).slice(11, 16))
+      if (m + 60 <= ini || m >= fin) continue
+      const k = fecha + ' ' + turno
+      res[k] = Math.max(res[k] || 0, Number(p[i]) || 0)
+    }
+  }
+  return res
+}
+
+/**
+ * Pasa al interior las reservas de terraza de un turno. Devuelve, para cada reserva,
+ * la mesa nueva o null si no queda sitio dentro (entonces se avisa al restaurante).
+ */
+function moverTerraza(fecha, turno, reservas) {
+  const terraza = new Set(MESAS.filter(esTerraza).map((m) => m.id))
+  const afectadas = reservas
+    .filter((r) => r.fecha === fecha && r.turno === turno && OCUPAN.includes(r.estado) && terraza.has(r.mesa))
+    .sort((a, b) => b.personas - a.personas)
+  const trabajo = reservas.map((r) => ({ ...r }))
+  const cambios = []
+  for (const r of afectadas) {
+    const yo = trabajo.find((x) => x.token === r.token)
+    const estados = estadoMesas(fecha, r.hora, Number(r.personas), trabajo, { ignorar: r.token }).filter((m) => !terraza.has(m.id))
+    const mesa = mejorMesa(estados)
+    if (mesa) yo.mesa = mesa.id
+    cambios.push({ token: r.token, nombre: r.nombre, email: r.email, hora: r.hora, personas: Number(r.personas), codigo: r.codigo, fecha, antes: r.mesa, mesa: mesa ? mesa.id : null })
+  }
+  return cambios
+}
+
+function emailCambioTerraza(c, prob) {
+  return emailHtml({
+    titulo: 'Te pasamos dentro',
+    intro: 'Hola ' + esc(String(c.nombre).split(' ')[0]) + ', la previsión da un ' + prob + ' % de lluvia para tu reserva, así que te hemos guardado una mesa en el salón. No tienes que hacer nada.',
+    filas: [['Fecha', fechaLarga(c.fecha)], ['Hora', c.hora], ['Personas', String(c.personas)], ['Mesa nueva', nombreMesa(c.mesa) + ' · ' + ((MESAS.find((m) => m.id === c.mesa) || {}).zona || '')]],
+  })
+}
+
+/** Cliente: visitas, ausencias y última visita, a partir del historial de reservas. */
+function historialClientes(reservas) {
+  const h = {}
+  for (const r of reservas) {
+    if (!r.telefono) continue
+    const c = (h[r.telefono] = h[r.telefono] || { telefono: r.telefono, nombre: r.nombre, email: r.email, visitas: 0, noShows: 0, ultima: '', reciente: '' })
+    if (r.estado === 'llegada') {
+      c.visitas++
+      if (r.fecha > c.ultima) c.ultima = r.fecha
+    }
+    if (r.estado === 'no_show') c.noShows++
+    if (r.email) c.email = r.email
+    if (r.fecha >= c.reciente) {
+      c.nombre = r.nombre
+      c.reciente = r.fecha
+    }
+  }
+  return h
+}
+
+const CELEBRACION = /cumple|aniversari|celebra|pedida|despedida|sorpresa|vela/i
+
+/** Hoja de cocina de un turno: comensales por hora, alergias por mesa y celebraciones. */
+function hojaCocina(fecha, turno, reservas) {
+  const rs = reservas
+    .filter((r) => r.fecha === fecha && r.turno === turno && OCUPAN.includes(r.estado))
+    .sort((a, b) => a.hora.localeCompare(b.hora))
+  const porHora = {}
+  for (const r of rs) porHora[r.hora] = (porHora[r.hora] || 0) + Number(r.personas)
+  const notas = rs.filter((r) => r.notas)
+  const alergias = notas.filter((r) => !CELEBRACION.test(r.notas))
+  const fiestas = notas.filter((r) => CELEBRACION.test(r.notas))
+  const fila = (r) =>
+    '<tr><td style="padding:6px 8px;font-weight:700">' + esc(r.hora) + '</td><td style="padding:6px 8px">Mesa ' + esc(nombreMesa(r.mesa) || '—') + '</td><td style="padding:6px 8px">' +
+    esc(r.nombre) + ' · ' + r.personas + ' pax</td><td style="padding:6px 8px;color:#b4532a;font-weight:600">' + esc(r.notas) + '</td></tr>'
+  const tabla = (lista) => '<table role="presentation" width="100%" style="border-collapse:collapse;font-size:14px;margin-top:6px">' + lista.map(fila).join('') + '</table>'
+  const ritmo = Object.entries(porHora).map(([h, n]) => esc(h) + ': <b>' + n + '</b>').join(' · ')
+  const comensales = rs.reduce((s, r) => s + Number(r.personas), 0)
+  return {
+    comensales,
+    mesas: rs.length,
+    alergias: alergias.length,
+    celebraciones: fiestas.length,
+    html: emailHtml({
+      titulo: 'Hoja de cocina · ' + (turno === 'cena' ? 'cena' : 'comida'),
+      intro: '<b>' + comensales + ' comensales</b> en ' + rs.length + ' mesas el ' + esc(fechaLarga(fecha)) + '.<br>Llegadas: ' + (ritmo || 'ninguna') +
+        (alergias.length ? '<br><br><b>⚠ Alergias e indicaciones</b>' + tabla(alergias) : '<br><br>Sin alergias anotadas.') +
+        (fiestas.length ? '<br><br><b>🎂 Celebraciones</b>' + tabla(fiestas) : ''),
+    }),
+  }
+}
+
+/** Clientes que vinieron al menos dos veces y llevan más de N días sin volver ni tener reserva. */
+function clientesARecuperar(reservas, avisados, dias) {
+  if (!dias) return []
+  const limite = hoy(-dias)
+  const futuras = new Set(reservas.filter((r) => r.fecha >= hoy() && OCUPAN.includes(r.estado)).map((r) => r.telefono))
+  return Object.values(historialClientes(reservas)).filter(
+    (c) => c.email && c.visitas >= 2 && c.ultima && c.ultima < limite && !futuras.has(c.telefono) && !((avisados || {})[c.telefono] >= limite),
+  )
+}
+
+function emailRecuperar(c) {
+  return emailHtml({
+    titulo: 'Te echamos de menos',
+    intro: 'Hola ' + esc(String(c.nombre).split(' ')[0]) + ', hace tiempo que no te vemos por ' + esc(CFG.nombre) + '. Hay platos nuevos de temporada en la carta y nos encantaría volver a verte. ¿Te guardamos mesa?',
+    botones: [{ texto: 'Reservar mesa', url: SECRETOS.url + '/reservar' }, { texto: 'Ver la carta', url: SECRETOS.url + '/carta', secundario: true }],
+    pie: 'Si no quieres recibir más avisos como este, responde a este email.',
+  })
+}
+
+/* ----------------------------------------------------- piezas de los flujos (también las usa la demo del navegador) */
+
+const urlMapa = () => (CFG.direccion ? 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(CFG.nombre + ' ' + CFG.direccion) : '')
+
+/** Respuesta y email de una reserva recién creada. */
+function confirmacionReserva(r) {
+  const mapa = urlMapa()
+  return {
+    body: { ok: true, codigo: r.codigo, fecha: r.fecha, fechaTexto: fechaLarga(r.fecha), hora: r.hora, personas: r.personas, nombre: r.nombre, email: r.email, mesa: nombreMesa(r.mesa), zona: (MESAS.find((m) => m.id === r.mesa) || {}).zona || '', gestionar: enlace(r.token) },
+    para: r.email,
+    asunto: 'Reserva confirmada · ' + fechaLarga(r.fecha) + ' a las ' + r.hora,
+    html: emailHtml({
+      titulo: '¡Reserva confirmada!',
+      intro: 'Hola ' + esc(r.nombre.split(' ')[0]) + ', te esperamos. Si no puedes venir, cancélala con el botón para que otra persona aproveche la mesa.',
+      filas: datosReserva(r),
+      botones: [{ texto: 'Ver o cancelar', url: enlace(r.token) }].concat(mapa ? [{ texto: 'Cómo llegar', url: mapa, secundario: true }] : []),
+    }),
+  }
+}
+
+function avisoListaEspera(e) {
+  return {
+    body: { ok: true, fechaTexto: fechaLarga(e.fecha), email: e.email },
+    para: e.email,
+    asunto: 'Estás en la lista de espera · ' + fechaLarga(e.fecha),
+    html: emailHtml({
+      titulo: 'Estás en la lista de espera',
+      intro: 'Si se libera una mesa para ' + e.personas + ' el ' + esc(fechaLarga(e.fecha)) + ' en el turno de ' + e.turno + ', <b>te la reservaremos automáticamente</b> y te avisaremos por aquí. No tienes que hacer nada más.',
+    }),
+  }
+}
+
+/**
+ * Lista de espera: por orden de llegada, busca su hora preferida o la más cercana del mismo turno
+ * con mesa libre. Devuelve las reservas nuevas (ref = id de la fila de espera).
+ */
+function asignarListaEspera(espera, reservas) {
+  const lista = espera.filter((e) => e.estado === 'esperando' && e.fecha >= hoy()).sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))
+  const nuevas = []
+  for (const e of lista) {
+    if (reservas.some((r) => r.fecha === e.fecha && r.telefono === e.telefono && OCUPAN.includes(r.estado))) continue
+    const disp = disponibilidad(e.fecha, reservas, e.personas)
+    if (!disp.ok || disp.cerrado) continue
+    const opciones = disp.horas
+      .filter((h) => h.disponible && h.turno === e.turno)
+      .sort((a, b) => Math.abs(minutos(a.hora) - minutos(e.hora)) - Math.abs(minutos(b.hora) - minutos(e.hora)))
+    let elegida = null
+    for (const h of opciones) {
+      const mesa = mejorMesa(estadoMesas(e.fecha, h.hora, e.personas, reservas))
+      if (mesa) {
+        elegida = { hora: h.hora, mesa: mesa.id }
+        break
+      }
+    }
+    if (!elegida) continue
+    const nueva = {
+      codigo: nuevoCodigo(), token: nuevoToken(), nombre: e.nombre, email: e.email, telefono: e.telefono,
+      fecha: e.fecha, hora: elegida.hora, turno: turnoDe(elegida.hora), personas: e.personas, notas: e.notas, mesa: elegida.mesa,
+      origen: 'espera', estado: 'confirmada', asistencia: '', recordatorio: false, resena: false, ref: String(e.id),
+    }
+    reservas.push(nueva) // el siguiente de la lista ya ve la mesa ocupada
+    nuevas.push(nueva)
+  }
+  return nuevas
+}
+
+function avisoMesaLiberada(r) {
+  return {
+    para: r.email,
+    asunto: '¡Tienes mesa! ' + fechaLarga(r.fecha) + ' a las ' + r.hora,
+    html: emailHtml({
+      titulo: '¡Se ha liberado una mesa para ti!',
+      intro: 'Hola ' + esc(r.nombre.split(' ')[0]) + ', estabas en nuestra lista de espera y <b>ya tienes la reserva hecha</b>. Si al final no te viene bien, cancélala con el botón.',
+      filas: datosReserva(r),
+      botones: [{ texto: 'Ver o cancelar', url: enlace(r.token) }],
+    }),
+  }
+}
+
+function recordatorio(r) {
+  return {
+    token: r.token,
+    para: r.email,
+    asunto: 'Mañana te esperamos a las ' + r.hora + ' · ' + CFG.nombre,
+    html: emailHtml({
+      titulo: 'Te esperamos mañana',
+      intro: 'Hola ' + esc(r.nombre.split(' ')[0]) + ', te recordamos tu reserva. ¿Nos confirmas que venís? Si no podéis, cancélala y daremos la mesa a quien está en lista de espera.',
+      filas: datosReserva(r),
+      botones: [{ texto: 'Sí, allí estaremos', url: enlace(r.token) + '&accion=confirmar' }, { texto: 'No podemos ir', url: enlace(r.token) + '&accion=cancelar', secundario: true }],
+    }),
+  }
+}
+
+function peticionResena(r) {
+  return {
+    token: r.token,
+    para: r.email,
+    asunto: '¿Qué tal ayer en ' + CFG.nombre + '?',
+    html: emailHtml({
+      titulo: 'Gracias por venir',
+      intro: 'Hola ' + esc(r.nombre.split(' ')[0]) + ', esperamos que disfrutarais. Tu opinión nos ayuda muchísimo a que más gente nos conozca. ¿Nos dejas una reseña? Es un minuto.',
+      botones: [{ texto: '★★★★★ Dejar reseña en Google', url: CFG.resena }],
+      pie: 'Si algo no estuvo a la altura, responde a este email: lo leemos personalmente.',
+    }),
+  }
+}
+
+/** Informe de la mañana para el dueño: reservas de hoy y balance de ayer. */
+function informeDiario(hoyR, ayer) {
+  const act = hoyR.filter((r) => OCUPAN.includes(r.estado)).sort((a, b) => a.hora.localeCompare(b.hora))
+  const plazas = mesasActivas().reduce((s, m) => s + Number(m.plazas), 0)
+  const pax = (t) => act.filter((r) => r.turno === t).reduce((s, r) => s + Number(r.personas), 0)
+  const cuenta = (e) => ayer.filter((r) => r.estado === e).length
+  const tabla = act.length
+    ? '<table width="100%" style="border-collapse:collapse;font-size:14px">' + act.map((r) => '<tr><td style="padding:6px 0;border-bottom:1px solid #eee;width:56px"><b>' + r.hora + '</b></td><td style="padding:6px 0;border-bottom:1px solid #eee">' + esc(r.nombre) + ' · mesa ' + esc(nombreMesa(r.mesa)) + (r.asistencia === 'confirmada' ? ' ✓' : '') + (r.notas ? '<br><span style="color:#b45309">⚠ ' + esc(r.notas) + '</span>' : '') + '</td><td style="padding:6px 0;border-bottom:1px solid #eee;text-align:right"><b>' + r.personas + '</b> pax</td></tr>').join('') + '</table>'
+    : '<p>Hoy no hay reservas.</p>'
+  const conNotas = act.filter((r) => r.notas).length
+  return {
+    asunto: 'Hoy: ' + act.length + ' reservas · ' + (pax('comida') + pax('cena')) + ' comensales · ' + CFG.nombre,
+    html: emailHtml({
+      titulo: 'Resumen de ' + fechaLarga(hoy()),
+      intro: '<b>Comida:</b> ' + pax('comida') + ' comensales · <b>Cena:</b> ' + pax('cena') + ' comensales (' + plazas + ' plazas por turno)<br>' +
+        act.filter((r) => r.asistencia === 'confirmada').length + ' han confirmado asistencia' + (conNotas ? ' · <b style="color:#b45309">' + conNotas + ' con alergias o notas</b>' : '') +
+        '<br><br>' + tabla +
+        '<br><b>Ayer:</b> ' + cuenta('llegada') + ' llegadas · ' + cuenta('no_show') + ' no se presentaron · ' + cuenta('cancelada') + ' cancelaciones',
+      botones: [{ texto: 'Abrir la administración', url: SECRETOS.url + '/admin' }],
+    }),
+  }
+}
+
+/**
+ * Valida y asigna mesa a una reserva nueva. «val» es la salida de validarReserva más interno y origen.
+ * Devuelve { error: { status, body } } o { fila } lista para guardar.
+ */
+function asignarReserva(val, rs) {
+  const no = (status, errores, extra = {}) => ({ error: { status, body: { ok: false, errores, ...extra } } })
+  if (!val.ok) return no(400, val.errores)
+  const d = val.datos
+  const disp = disponibilidad(d.fecha, rs, d.personas, { ignorarAntelacion: val.interno })
+  if (!disp.ok) return no(400, [disp.motivo])
+  if (disp.cerrado) return no(409, [disp.motivo])
+  const repetida = rs.find((r) => r.fecha === d.fecha && r.telefono === d.telefono && OCUPAN.includes(r.estado))
+  if (repetida) return no(409, ['Ya tienes una reserva ese día a las ' + repetida.hora + ' (código ' + repetida.codigo + ').'])
+  const hueco = disp.horas.find((h) => h.hora === d.hora)
+  const sinSitio = (msg) => no(409, [msg], { alternativas: alternativas(disp, d.hora), lista_espera: !!(hueco && !hueco.pasada) })
+  if (!hueco || !hueco.disponible) return sinSitio(hueco && hueco.pasada ? 'Esa hora ya no admite reservas online.' : 'No queda sitio a las ' + d.hora + ' para ' + d.personas + '.')
+  const estados = estadoMesas(d.fecha, d.hora, d.personas, rs)
+  const mesa = mejorMesa(estados, d.mesa || '')
+  if (!mesa) {
+    const m = estados.find((x) => x.id === d.mesa)
+    return sinSitio(m ? (m.estado === 'no_cabe' ? 'La mesa ' + m.nombre + ' es para ' + (MESAS.find((x) => x.id === m.id) || {}).min + ' a ' + m.plazas + ' personas.' : 'La mesa ' + m.nombre + ' ya está reservada a esa hora.') : 'Esa mesa no existe.')
+  }
+  return {
+    fila: {
+      codigo: nuevoCodigo(), token: nuevoToken(), nombre: d.nombre, email: d.email, telefono: d.telefono,
+      fecha: d.fecha, hora: d.hora, turno: turnoDe(d.hora), personas: d.personas, notas: d.notas, mesa: mesa.id,
+      origen: val.origen, estado: 'confirmada', asistencia: '', recordatorio: false, resena: false, ref: '',
+    },
+  }
 }

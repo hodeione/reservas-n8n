@@ -20,6 +20,11 @@ export interface Restaurante {
   maxPersonas: number
   resena?: string
   emailDueno?: string
+  emailCocina?: string
+  /** % de probabilidad de lluvia a partir del cual se recoge la terraza (0 = nunca). */
+  lluviaUmbral?: number
+  /** Días sin venir para invitar a volver a un cliente habitual (0 = nunca). */
+  recuperarDias?: number
 }
 
 export interface Mesa {
@@ -99,7 +104,30 @@ export interface DatosAdmin {
   reservas: Reserva[]
   espera: { nombre: string; telefono: string; fecha: string; hora: string; personas: number }[]
   opciones: { modelos: string[]; alergenos: string[]; etiquetas: string[] }
+  /** Historial de los clientes con reserva ese día, por teléfono. */
+  clientes?: Record<string, { visitas: number; noShows: number; ultima: string }>
 }
+
+export interface EmailDemo {
+  id: string
+  para: string
+  asunto: string
+  html: string
+  fecha: string
+  flujo: string
+}
+export interface RegistroDemo {
+  id: string
+  flujo: string
+  cuando: string
+  resumen: string
+  emails: number
+  manual: boolean
+}
+
+/** Demo pública: la API se sirve desde el propio navegador (ver lib/demo/servidor.ts). */
+export const DEMO = import.meta.env.VITE_DEMO === '1'
+export const CLAVE_DEMO = 'demo'
 
 export class ApiError extends Error {
   status: number
@@ -113,6 +141,15 @@ export class ApiError extends Error {
 }
 
 async function pedir<T>(path: string, init?: RequestInit & { clave?: string }): Promise<T> {
+  if (DEMO) {
+    const { atender, ErrorDemo } = await import('./demo/servidor')
+    try {
+      return (await atender(path, init)) as T
+    } catch (e) {
+      if (e instanceof ErrorDemo) throw new ApiError(e.status, e.data)
+      throw e
+    }
+  }
   let res: Response
   try {
     res = await fetch('/webhook' + path, {
@@ -135,6 +172,8 @@ async function pedir<T>(path: string, init?: RequestInit & { clave?: string }): 
   return data as T
 }
 
+const TAREAS: Record<string, string> = { '03': 'tareas/recordatorios', '04': 'tareas/resenas', '05': 'interno/espera', '07': 'tareas/informe', '08': 'tareas/terraza', '09': 'tareas/cocina', '10': 'tareas/recuperar' }
+
 export const api = {
   web: () => pedir<DatosWeb>('/api/web'),
   disponibilidad: (fecha: string, personas: number) =>
@@ -153,5 +192,19 @@ export const api = {
       pedir<{ ok: true; valor: T }>('/api/admin/guardar', { method: 'POST', body: JSON.stringify({ tipo, valor }), clave }),
     estado: (clave: string, token: string, estado: Reserva['estado']) => pedir<{ ok: true }>('/api/panel', { method: 'POST', body: JSON.stringify({ token, estado }), clave }),
     mover: (clave: string, token: string, mesa: string) => pedir<{ ok: true }>('/api/panel', { method: 'POST', body: JSON.stringify({ token, mesa }), clave }),
+    /** Lanza una automatización en el momento (en producción, los webhooks /tareas/* de n8n). */
+    ejecutar: (clave: string, flujo: string, extra: Record<string, unknown> = {}) =>
+      DEMO
+        ? pedir<{ ok: true; registro: RegistroDemo }>('/api/demo/ejecutar', { method: 'POST', body: JSON.stringify({ flujo, ...extra }), clave })
+        : pedir<{ message?: string }>('/' + TAREAS[flujo], { method: 'POST', body: JSON.stringify({ clave, ...extra }) }),
+  },
+  demo: {
+    bandeja: () => pedir<{ emails: EmailDemo[]; registro: RegistroDemo[] }>('/api/demo/bandeja'),
+    reiniciar: () => pedir<{ ok: true }>('/api/demo/reiniciar', { method: 'POST', body: '{}' }),
+    reserva: (t: string, accion?: 'cancelar' | 'confirmar') =>
+      pedir<{ ok: true; aviso: string; reserva: Reserva & { fecha: string; fechaTexto: string; mesaNombre: string; zona: string; activa: boolean } }>(
+        '/api/demo/reserva?t=' + encodeURIComponent(t),
+        accion ? { method: 'POST', body: JSON.stringify({ t, accion }) } : undefined,
+      ),
   },
 }

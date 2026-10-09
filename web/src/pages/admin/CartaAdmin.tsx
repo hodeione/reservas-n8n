@@ -4,13 +4,8 @@ import { Imagen } from '../../components/Sitio'
 import { BarraGuardar, Campo, Interruptor, Modal, Tarjeta, entrada, useBorrador } from '../../components/ui'
 import { api, type Carta, type DatosAdmin, type Plato } from '../../lib/api'
 import { ALERGENOS, euros } from '../../lib/util'
+import { esReal, nombreModelo, urlMiniatura } from '../../lib/modelos'
 
-const NOMBRES_MODELO: Record<string, string> = {
-  salad: 'Ensalada', 'skewer-vegetables': 'Brocheta', 'bowl-soup': 'Sopa', fries: 'Patatas', 'burger-cheese': 'Hamburguesa', pizza: 'Pizza', 'meat-ribs': 'Costillas',
-  fish: 'Pescado', 'meat-cooked': 'Carne', 'maki-salmon': 'Maki', 'sushi-salmon': 'Sushi', cake: 'Tarta', pancakes: 'Tortitas', 'ice-cream-cup': 'Helado', waffle: 'Gofre',
-  'wine-red': 'Botella de vino', 'glass-wine': 'Copa de vino', cocktail: 'Cóctel', 'cup-coffee': 'Café', croissant: 'Cruasán', taco: 'Taco', sandwich: 'Bocadillo', pie: 'Pastel',
-  'dim-sum': 'Dim sum', cupcake: 'Magdalena', chinese: 'Wok', pudding: 'Flan', sundae: 'Copa de helado', 'soda-glass': 'Refresco', 'mussel-open': 'Mejillón', 'egg-cooked': 'Huevo',
-}
 
 const mover = <T,>(l: T[], i: number, d: number) => {
   const j = i + d
@@ -272,13 +267,14 @@ function EditarPlato({
             <button type="button" onClick={() => set('modelo', '')} aria-pressed={!p.modelo} title="Sin modelo" className={`flex aspect-square items-center justify-center rounded-xl text-xs ${!p.modelo ? 'bg-teja text-white' : 'bg-white'}`}>
               Ninguno
             </button>
-            {opciones.modelos.map((m) => (
-              <button type="button" key={m} onClick={() => set('modelo', m)} aria-pressed={p.modelo === m} title={NOMBRES_MODELO[m] ?? m} className={`aspect-square rounded-xl p-1 ${p.modelo === m ? 'bg-teja/20 ring-2 ring-teja' : 'bg-white'}`}>
-                <img src={`/miniaturas/${m}.png`} alt={NOMBRES_MODELO[m] ?? m} className="h-full w-full object-contain" loading="lazy" />
+            {[...opciones.modelos].sort((a, b) => Number(esReal(b)) - Number(esReal(a))).map((m) => (
+              <button type="button" key={m} onClick={() => set('modelo', m)} aria-pressed={p.modelo === m} title={nombreModelo(m) + (esReal(m) ? ' (escaneo real)' : ' (ilustración)')} className={`relative aspect-square rounded-xl p-1 ${p.modelo === m ? 'bg-teja/20 ring-2 ring-teja' : 'bg-white'}`}>
+                <img src={urlMiniatura(m)} alt={nombreModelo(m)} className="h-full w-full object-contain" loading="lazy" />
+                {esReal(m) && <span className="absolute bottom-0.5 right-0.5 rounded bg-tinta px-1 text-[9px] font-bold text-oro">REAL</span>}
               </button>
             ))}
           </div>
-          {p.modelo && <p className="text-center text-xs text-gris">{NOMBRES_MODELO[p.modelo] ?? p.modelo}</p>}
+          {p.modelo && <p className="text-center text-xs text-gris">{nombreModelo(p.modelo)}{esReal(p.modelo) ? ' · escaneo 3D real' : ' · ilustración'}</p>}
         </div>
 
         <div className="flex gap-2 border-t border-linea pt-4 md:col-span-2">

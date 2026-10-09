@@ -2,6 +2,7 @@ import { useEffect, useRef, type ReactNode } from 'react'
 import type { Plato, Restaurante } from '../lib/api'
 import { ALERGENOS, DIAS, alClicar, euros, useRuta } from '../lib/util'
 import { Modelo3D } from './Modelo3D'
+import { credito, esReal, urlMiniatura } from '../lib/modelos'
 
 export function Cabecera({ r }: { r: Restaurante }) {
   const ruta = useRuta()
@@ -92,13 +93,13 @@ export function Alergenos({ lista, compacto = false }: { lista: string[]; compac
 }
 
 export function Imagen({ p, className = '' }: { p: Plato; className?: string }) {
-  const src = p.imagen || (p.modelo ? `/miniaturas/${p.modelo}.png` : '')
+  const src = p.imagen || (p.modelo ? urlMiniatura(p.modelo) : '')
   if (!src) return <div className={`flex items-center justify-center bg-linea/50 text-3xl ${className}`}>🍽️</div>
   return <img src={src} alt="" loading="lazy" className={`object-contain ${className}`} />
 }
 
 /** Ficha de un plato con su modelo 3D, a pantalla completa en el móvil. */
-export function FichaPlato({ p, onCerrar }: { p: Plato; onCerrar: () => void }) {
+export function FichaPlato({ p, onCerrar, onServir }: { p: Plato; onCerrar: () => void; onServir?: (p: Plato) => void }) {
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const prev = document.body.style.overflow
@@ -125,7 +126,7 @@ export function FichaPlato({ p, onCerrar }: { p: Plato; onCerrar: () => void }) 
         <button onClick={onCerrar} aria-label="Cerrar" className="absolute right-3 top-3 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-white/90 text-xl shadow">×</button>
         <div className="relative h-[46vh] shrink-0 bg-[radial-gradient(circle_at_50%_40%,#fff,#efe6d8)] md:h-auto md:w-1/2">
           {p.modelo ? <Modelo3D modelo={p.modelo} nombre={p.nombre} ar className="h-full w-full" /> : <Imagen p={p} className="h-full w-full p-8" />}
-          {p.modelo && <p className="pointer-events-none absolute left-0 right-0 top-3 text-center text-xs text-gris">Gíralo con el dedo</p>}
+          {p.modelo && <p className="pointer-events-none absolute left-0 right-0 top-3 text-center text-xs text-gris">{esReal(p.modelo) ? 'Escaneo 3D del plato · gíralo con el dedo' : 'Gíralo con el dedo'}</p>}
         </div>
         <div className="overflow-y-auto p-6 md:w-1/2">
           <h2 className="font-serif text-3xl leading-tight">{p.nombre}</h2>
@@ -138,7 +139,21 @@ export function FichaPlato({ p, onCerrar }: { p: Plato; onCerrar: () => void }) 
           <p className="mt-4 leading-relaxed text-tinta/85">{p.descripcion}</p>
           <h3 className="mb-2 mt-6 text-xs font-bold uppercase tracking-widest text-gris">Alérgenos</h3>
           <Alergenos lista={p.alergenos} />
-          {p.modelo && <p className="mt-6 text-xs text-gris">Modelo 3D orientativo. En el móvil pulsa «Verlo en tu mesa» para colocarlo sobre tu mesa con la cámara.</p>}
+          {p.modelo && onServir && (
+            <button onClick={() => onServir(p)} className="mt-6 flex w-full items-center justify-center gap-2 rounded-full bg-tinta px-5 py-3.5 font-semibold text-crema">
+              🍽️ Sírvelo en tu plato
+            </button>
+          )}
+          {p.modelo && onServir && <p className="mt-2 text-center text-xs text-gris">Apunta con la cámara a un plato vacío y verás cómo llega a tu mesa.</p>}
+          {p.modelo && credito(p.modelo) && (
+            <p className="mt-5 text-[11px] text-gris">
+              Escaneo 3D «{credito(p.modelo).titulo}» de{' '}
+              <a className="underline" href={credito(p.modelo).url} target="_blank" rel="noopener noreferrer">
+                {credito(p.modelo).autor}
+              </a>{' '}
+              ({credito(p.modelo).licencia}).
+            </p>
+          )}
         </div>
       </div>
     </div>
