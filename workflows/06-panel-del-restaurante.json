@@ -1,0 +1,361 @@
+{
+  "name": "06 · Panel del restaurante",
+  "nodes": [
+    {
+      "name": "GET /panel",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "webhookId": "ca670f84-b6b9-85d4-977d-150a94efa037",
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "panel",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "a5c621c1-cfd9-28e6-4eb8-d2368febb41d",
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "name": "Reservas del día (panel)",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "alwaysOutputData": true,
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "__DT_RESERVAS__"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "fecha",
+              "condition": "eq",
+              "keyValue": "={{ /^\\d{4}-\\d{2}-\\d{2}$/.test($json.query.fecha || \"\") ? $json.query.fecha : $now.toFormat(\"yyyy-MM-dd\") }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "id": "4bf9137e-c9eb-9f14-f0be-4a27dba23805",
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "name": "Pintar panel",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "/* =====================================================================\n * Librería común de los flujos. El generador (scripts/build.mjs) la\n * antepone al código de cada nodo Code, así que aquí se puede usar lo\n * que ofrece n8n: $env, $now (luxon en Europe/Madrid) y DateTime.\n * ===================================================================== */\n\nconst CFG = (() => {\n  const list = (s) => String(s || '').split(',').map((x) => x.trim()).filter(Boolean)\n  const num = (v, d) => (Number.isFinite(Number(v)) && String(v).trim() !== '' ? Number(v) : d)\n  return {\n    nombre: $env.REST_NOMBRE || 'Restaurante',\n    telefono: $env.REST_TELEFONO || '',\n    direccion: $env.REST_DIRECCION || '',\n    remitente: $env.REST_EMAIL_REMITENTE || 'reservas@example.com',\n    dueno: $env.REST_EMAIL_DUENO || '',\n    aforo: { comida: num($env.REST_AFORO_COMIDA, 40), cena: num($env.REST_AFORO_CENA, 40) },\n    franja: num($env.REST_ENTRADAS_FRANJA, 16),\n    horas: { comida: list($env.REST_HORAS_COMIDA), cena: list($env.REST_HORAS_CENA) },\n    cerrado: list($env.REST_DIAS_CERRADO).map(Number),\n    maxPersonas: num($env.REST_MAX_PERSONAS, 10),\n    antelacionMin: num($env.REST_ANTELACION_MIN, 60),\n    diasMax: num($env.REST_DIAS_MAX, 60),\n    resena: $env.REST_URL_RESENA || '',\n    clavePanel: $env.REST_CLAVE_PANEL || '',\n    claveAgente: $env.REST_CLAVE_AGENTE || '',\n    url: String($env.WEBHOOK_URL || '').replace(/\\/$/, ''),\n  }\n})()\n\n/** Estados que ocupan sitio. */\nconst OCUPAN = ['confirmada', 'llegada']\n\nconst hoy = (dias = 0) => $now.plus({ days: dias }).toFormat('yyyy-MM-dd')\n\nfunction turnoDe(hora) {\n  if (CFG.horas.comida.includes(hora)) return 'comida'\n  if (CFG.horas.cena.includes(hora)) return 'cena'\n  return null\n}\n\nfunction fechaLarga(fecha) {\n  const d = DateTime.fromISO(fecha, { zone: $now.zoneName })\n  return d.isValid ? d.setLocale('es').toFormat(\"cccc d 'de' LLLL\") : fecha\n}\n\n/** Filas reales de una Data Table (la consulta vacía devuelve un único item sin id). */\nfunction filas(items) {\n  return items.map((i) => i.json).filter((r) => r && r.id !== undefined)\n}\n\n/**\n * Disponibilidad de un día. Dos límites a la vez:\n *  - aforo del turno (comensales totales en comida o cena),\n *  - ritmo de entradas: comensales que pueden llegar en la misma franja de 30 min.\n * Las horas que ya han pasado (más la antelación mínima) no se ofrecen.\n */\nfunction disponibilidad(fecha, reservas, personas = 2, { ignorarAntelacion = false } = {}) {\n  const d = DateTime.fromISO(fecha, { zone: $now.zoneName })\n  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(fecha) || !d.isValid) return { ok: false, motivo: 'Fecha no válida.' }\n  if (d.startOf('day') < $now.startOf('day')) return { ok: false, motivo: 'Esa fecha ya ha pasado.' }\n  if (d.startOf('day') > $now.plus({ days: CFG.diasMax }).startOf('day')) {\n    return { ok: false, motivo: `Solo se puede reservar con hasta ${CFG.diasMax} días de antelación.` }\n  }\n  if (CFG.cerrado.includes(d.weekday)) return { ok: true, cerrado: true, motivo: `${CFG.nombre} cierra ese día.`, horas: [] }\n\n  const activas = reservas.filter((r) => r.fecha === fecha && OCUPAN.includes(r.estado))\n  const porTurno = { comida: 0, cena: 0 }\n  const porHora = {}\n  for (const r of activas) {\n    const p = Number(r.personas) || 0\n    if (porTurno[r.turno] !== undefined) porTurno[r.turno] += p\n    porHora[r.hora] = (porHora[r.hora] || 0) + p\n  }\n  const limite = $now.plus({ minutes: ignorarAntelacion ? 0 : CFG.antelacionMin })\n  const horas = []\n  for (const turno of ['comida', 'cena']) {\n    for (const hora of CFG.horas[turno]) {\n      const [h, m] = hora.split(':').map(Number)\n      const momento = d.set({ hour: h, minute: m, second: 0, millisecond: 0 })\n      const libre = Math.max(0, Math.min(CFG.aforo[turno] - porTurno[turno], CFG.franja - (porHora[hora] || 0)))\n      const pasada = momento < limite\n      horas.push({ hora, turno, libre, disponible: !pasada && libre >= personas, pasada })\n    }\n  }\n  return {\n    ok: true,\n    cerrado: false,\n    fecha,\n    fechaTexto: fechaLarga(fecha),\n    horas,\n    ocupacion: {\n      comida: { comensales: porTurno.comida, aforo: CFG.aforo.comida },\n      cena: { comensales: porTurno.cena, aforo: CFG.aforo.cena },\n    },\n  }\n}\n\n/** Horas alternativas cercanas (mismo día y días siguientes) para quien no encuentra sitio. */\nfunction alternativas(disp, hora, personas) {\n  if (!disp.ok || disp.cerrado) return []\n  const [h, m] = (hora || '00:00').split(':').map(Number)\n  const minutos = (x) => {\n    const [a, b] = x.split(':').map(Number)\n    return a * 60 + b\n  }\n  return disp.horas\n    .filter((x) => x.disponible && x.libre >= personas)\n    .sort((a, b) => Math.abs(minutos(a.hora) - (h * 60 + m)) - Math.abs(minutos(b.hora) - (h * 60 + m)))\n    .slice(0, 3)\n    .map((x) => x.hora)\n}\n\nfunction limpiarTexto(v, max) {\n  return String(v ?? '').replace(/[\\u0000-\\u001f<>]/g, ' ').replace(/\\s+/g, ' ').trim().slice(0, max)\n}\n\nfunction normalizarTelefono(t) {\n  const d = String(t ?? '').replace(/[^\\d+]/g, '')\n  if (/^[6789]\\d{8}$/.test(d)) return '+34' + d\n  if (/^0034\\d{9}$/.test(d)) return '+' + d.slice(2)\n  if (/^\\+\\d{8,15}$/.test(d)) return d\n  return ''\n}\n\n/** Valida y normaliza los datos de una reserva. */\nfunction validarReserva(b) {\n  const errores = []\n  const datos = {\n    nombre: limpiarTexto(b.nombre, 80),\n    email: String(b.email ?? '').trim().toLowerCase().slice(0, 120),\n    telefono: normalizarTelefono(b.telefono),\n    fecha: String(b.fecha ?? '').trim(),\n    hora: String(b.hora ?? '').trim(),\n    personas: Math.floor(Number(b.personas)),\n    notas: limpiarTexto(b.notas, 300),\n  }\n  if (datos.nombre.length < 2) errores.push('Indica tu nombre.')\n  if (!datos.telefono) errores.push('Indica un teléfono válido.')\n  if (datos.email && !/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(datos.email)) errores.push('El email no es válido.')\n  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(datos.fecha)) errores.push('Elige una fecha.')\n  if (!turnoDe(datos.hora)) errores.push('Elige una hora.')\n  if (!(datos.personas >= 1)) errores.push('Indica el número de personas.')\n  else if (datos.personas > CFG.maxPersonas) {\n    errores.push(`Para grupos de más de ${CFG.maxPersonas} personas llámanos${CFG.telefono ? ' al ' + CFG.telefono : ''}.`)\n  }\n  return { ok: errores.length === 0, errores, datos }\n}\n\nconst crypto = require('crypto')\nconst nuevoToken = () => crypto.randomBytes(18).toString('base64url')\n/** Código corto para decirlo por teléfono: sin 0/O ni 1/I. */\nfunction nuevoCodigo() {\n  const abc = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'\n  let s = ''\n  for (const b of crypto.randomBytes(6)) s += abc[b % abc.length]\n  return s\n}\n\nconst enlace = (token) => `${CFG.url}/webhook/reserva?t=${encodeURIComponent(token)}`\nconst esc = (s) => String(s ?? '').replace(/[&<>\"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' })[c])\n\n/* ----------------------------------------------------------- plantillas */\n\nfunction emailHtml({ titulo, intro, filas: datos = [], botones = [], pie = '' }) {\n  const rows = datos\n    .map(([k, v]) => `<tr><td style=\"padding:6px 0;color:#6b7280;font-size:14px;width:120px\">${esc(k)}</td><td style=\"padding:6px 0;font-size:15px;color:#111827;font-weight:600\">${esc(v)}</td></tr>`)\n    .join('')\n  const btns = botones\n    .map(\n      (b) =>\n        `<a href=\"${esc(b.url)}\" style=\"display:inline-block;margin:6px 8px 0 0;padding:12px 20px;border-radius:10px;text-decoration:none;font-weight:600;font-size:15px;${\n          b.secundario ? 'background:#f3f4f6;color:#111827' : 'background:#111827;color:#ffffff'\n        }\">${esc(b.texto)}</a>`,\n    )\n    .join('')\n  return `<!doctype html><html lang=\"es\"><body style=\"margin:0;background:#f5f5f4;font-family:Arial,Helvetica,sans-serif\">\n<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"padding:24px 12px\"><tr><td align=\"center\">\n<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"max-width:520px;background:#ffffff;border-radius:16px;padding:28px\">\n<tr><td style=\"font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:#9ca3af\">${esc(CFG.nombre)}</td></tr>\n<tr><td style=\"padding-top:8px;font-size:24px;font-weight:700;color:#111827\">${esc(titulo)}</td></tr>\n<tr><td style=\"padding-top:10px;font-size:15px;line-height:1.55;color:#374151\">${intro}</td></tr>\n${rows ? `<tr><td style=\"padding-top:16px\"><table role=\"presentation\" width=\"100%\" style=\"border-top:1px solid #eee;border-bottom:1px solid #eee;padding:8px 0\">${rows}</table></td></tr>` : ''}\n${btns ? `<tr><td style=\"padding-top:18px\">${btns}</td></tr>` : ''}\n<tr><td style=\"padding-top:22px;font-size:13px;line-height:1.5;color:#9ca3af\">${pie || [CFG.direccion, CFG.telefono].filter(Boolean).map(esc).join(' · ')}</td></tr>\n</table></td></tr></table></body></html>`\n}\n\nfunction datosReserva(r) {\n  return [\n    ['Fecha', fechaLarga(r.fecha)],\n    ['Hora', r.hora],\n    ['Personas', String(r.personas)],\n    ['Nombre', r.nombre],\n    ['Código', r.codigo],\n  ].concat(r.notas ? [['Notas', r.notas]] : [])\n}\n\nconst CSS = `*{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#f5f3ef;color:#1c1917}\n.wrap{max-width:560px;margin:0 auto;padding:28px 16px 48px}.card{background:#fff;border-radius:20px;padding:24px;box-shadow:0 1px 2px rgba(0,0,0,.04),0 8px 30px rgba(0,0,0,.05)}\nh1{font-size:28px;margin:0 0 6px;letter-spacing:-.02em}.muted{color:#78716c}.brand{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#a8a29e;margin-bottom:6px}\n.btn{display:inline-block;border:0;border-radius:12px;padding:13px 20px;font-size:16px;font-weight:600;cursor:pointer;text-decoration:none;text-align:center}\n.btn-primary{background:#1c1917;color:#fff}.btn-ghost{background:#f5f5f4;color:#1c1917}.btn-danger{background:#fee2e2;color:#991b1b}\ndl{display:grid;grid-template-columns:110px 1fr;gap:8px 12px;margin:18px 0;padding:16px 0;border-top:1px solid #eee;border-bottom:1px solid #eee}dt{color:#78716c}dd{margin:0;font-weight:600}\n.ok{color:#15803d}.bad{color:#b91c1c}`\n\nfunction pagina(titulo, cuerpo) {\n  return `<!doctype html><html lang=\"es\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"robots\" content=\"noindex\">\n<title>${esc(titulo)} · ${esc(CFG.nombre)}</title><style>${CSS}</style></head><body><div class=\"wrap\"><div class=\"brand\">${esc(CFG.nombre)}</div>${cuerpo}</div></body></html>`\n}\n\nfunction respuesta(status, body) {\n  return [{ json: { status, body } }]\n}\n\n/* ---- Pintar panel ---- */\nconst q = $('GET /panel').first().json.query || {}\nif (!CFG.clavePanel || q.clave !== CFG.clavePanel) {\n  return [{ json: { status: 401, html: pagina('Panel', '<div class=\"card\"><h1>Panel del restaurante</h1><form method=\"get\"><label>Clave</label><input name=\"clave\" type=\"password\" autofocus style=\"width:100%;padding:12px;border:1px solid #ddd;border-radius:10px;margin:8px 0\"><button class=\"btn btn-primary\">Entrar</button></form></div>') } }]\n}\nconst fecha = /^\\d{4}-\\d{2}-\\d{2}$/.test(q.fecha || '') ? q.fecha : hoy()\nconst d = DateTime.fromISO(fecha, { zone: $now.zoneName })\nconst datos = {\n  clave: q.clave, fecha, hoy: hoy(), fechaTexto: fechaLarga(fecha), cerrado: CFG.cerrado.includes(d.weekday), aforo: CFG.aforo,\n  reservas: filas($input.all()).map((r) => ({ token: r.token, codigo: r.codigo, nombre: r.nombre, telefono: r.telefono, hora: r.hora, turno: r.turno, personas: Number(r.personas), notas: r.notas, estado: r.estado, asistencia: r.asistencia, origen: r.origen })),\n}\nconst html = \"<!doctype html>\\n<html lang=\\\"es\\\">\\n<head>\\n<meta charset=\\\"utf-8\\\" />\\n<meta name=\\\"viewport\\\" content=\\\"width=device-width,initial-scale=1\\\" />\\n<meta name=\\\"robots\\\" content=\\\"noindex\\\" />\\n<title>Panel · __NOMBRE__</title>\\n<style>\\n  *{box-sizing:border-box}\\n  :root{--bg:#111214;--card:#1a1c1f;--line:#2a2d32;--ink:#f2f2f0;--mute:#9a9ea6;--acc:#e8a33d;--ok:#4caf6d;--bad:#e5534b;--blue:#5aa2ff}\\n  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,\\\"Segoe UI\\\",Roboto,sans-serif}\\n  .wrap{max-width:1100px;margin:0 auto;padding:18px 16px 60px}\\n  header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px}\\n  h1{margin:0;font-size:22px}\\n  .nav{display:flex;gap:6px;align-items:center}\\n  .nav a,.nav button{background:var(--card);border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:8px 12px;text-decoration:none;font:inherit;cursor:pointer}\\n  .nav input{background:var(--card);border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:7px 10px;font:inherit;color-scheme:dark}\\n  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:16px 0}\\n  .kpi{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px}\\n  .kpi b{display:block;font-size:26px}\\n  .kpi small{color:var(--mute)}\\n  .bar{height:6px;border-radius:9px;background:var(--line);margin-top:8px;overflow:hidden}\\n  .bar i{display:block;height:100%;background:var(--acc)}\\n  h2{font-size:14px;letter-spacing:.12em;text-transform:uppercase;color:var(--mute);margin:22px 0 8px}\\n  table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden}\\n  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}\\n  th{font-size:12px;color:var(--mute);font-weight:600;text-transform:uppercase;letter-spacing:.06em}\\n  tr:last-child td{border-bottom:0}\\n  tr.cancelada,tr.no_show{opacity:.45}\\n  tr.llegada td:first-child{box-shadow:inset 3px 0 0 var(--ok)}\\n  .hora{font-weight:800;font-size:17px}\\n  .pax{font-weight:800;font-size:17px}\\n  .tag{display:inline-block;font-size:11px;font-weight:700;border-radius:999px;padding:2px 8px;margin:2px 4px 0 0;background:var(--line);color:var(--mute)}\\n  .tag.ok{background:rgba(76,175,109,.18);color:var(--ok)}\\n  .tag.warn{background:rgba(232,163,61,.18);color:var(--acc)}\\n  .tag.bad{background:rgba(229,83,75,.18);color:var(--bad)}\\n  .tag.blue{background:rgba(90,162,255,.18);color:var(--blue)}\\n  .notas{color:var(--acc);font-size:13px;margin-top:4px}\\n  a.tel{color:var(--ink)}\\n  .acc{display:flex;flex-wrap:wrap;gap:6px}\\n  .acc button{border:1px solid var(--line);background:transparent;color:var(--ink);border-radius:9px;padding:6px 10px;font:600 13px system-ui;cursor:pointer}\\n  .acc button.ok{border-color:var(--ok);color:var(--ok)}\\n  .acc button.bad{border-color:var(--bad);color:var(--bad)}\\n  .vacio{color:var(--mute);padding:18px;background:var(--card);border:1px dashed var(--line);border-radius:14px}\\n  form.nueva{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px}\\n  form.nueva input,form.nueva select{background:var(--bg);border:1px solid var(--line);color:var(--ink);border-radius:9px;padding:9px;font:inherit;color-scheme:dark}\\n  form.nueva button{background:var(--acc);color:#1b1305;border:0;border-radius:9px;font-weight:800;cursor:pointer}\\n  #toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#fff;color:#111;border-radius:10px;padding:10px 16px;font-weight:600;display:none}\\n  @media (max-width:760px){thead{display:none}tr{display:grid;grid-template-columns:70px 1fr;padding:6px 0}td{border:0;padding:4px 12px}td.c-hora{grid-row:span 3}}\\n  @media print{.nav,.acc,form.nueva,#toast{display:none}body{background:#fff;color:#000}table,.kpi{border-color:#ccc;background:#fff}}\\n</style>\\n</head>\\n<body>\\n<div class=\\\"wrap\\\">\\n  <header>\\n    <div><div style=\\\"color:var(--mute);font-size:12px;letter-spacing:.12em;text-transform:uppercase\\\">__NOMBRE__ · panel</div><h1 id=\\\"titulo\\\"></h1></div>\\n    <div class=\\\"nav\\\">\\n      <a id=\\\"ant\\\" href=\\\"#\\\">‹</a><a id=\\\"hoyBtn\\\" href=\\\"#\\\">Hoy</a><a id=\\\"sig\\\" href=\\\"#\\\">›</a>\\n      <input type=\\\"date\\\" id=\\\"fecha\\\" aria-label=\\\"Fecha\\\" />\\n      <button onclick=\\\"print()\\\">Imprimir</button>\\n    </div>\\n  </header>\\n  <section class=\\\"kpis\\\" id=\\\"kpis\\\"></section>\\n  <h2>Añadir reserva (teléfono o en persona)</h2>\\n  <form class=\\\"nueva\\\" id=\\\"nueva\\\">\\n    <input name=\\\"hora\\\" placeholder=\\\"Hora (13:30)\\\" required pattern=\\\"\\\\d{2}:\\\\d{2}\\\" />\\n    <input name=\\\"personas\\\" type=\\\"number\\\" min=\\\"1\\\" placeholder=\\\"Personas\\\" required />\\n    <input name=\\\"nombre\\\" placeholder=\\\"Nombre\\\" required />\\n    <input name=\\\"telefono\\\" placeholder=\\\"Teléfono\\\" required />\\n    <input name=\\\"email\\\" type=\\\"email\\\" placeholder=\\\"Email (opcional)\\\" />\\n    <input name=\\\"notas\\\" placeholder=\\\"Notas / alergias\\\" />\\n    <button>Reservar</button>\\n  </form>\\n  <div id=\\\"lista\\\"></div>\\n</div>\\n<div id=\\\"toast\\\" role=\\\"status\\\"></div>\\n<script>\\nconst D = __DATA__;\\nconst $ = (id) => document.getElementById(id);\\nconst esc = (s) => String(s ?? '').replace(/[&<>\\\"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\\\"': '&quot;' })[c]);\\nconst tel = (t) => { const m = /^\\\\+34(\\\\d{3})(\\\\d{2})(\\\\d{2})(\\\\d{2})$/.exec(t || ''); return m ? m[1] + ' ' + m[2] + ' ' + m[3] + ' ' + m[4] : (t || ''); };\\nconst go = (f) => { location.href = '?clave=' + encodeURIComponent(D.clave) + '&fecha=' + f; };\\nconst shift = (n) => { const d = new Date(D.fecha + 'T12:00:00'); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };\\n$('ant').onclick = (e) => { e.preventDefault(); go(shift(-1)); };\\n$('sig').onclick = (e) => { e.preventDefault(); go(shift(1)); };\\n$('hoyBtn').onclick = (e) => { e.preventDefault(); go(D.hoy); };\\n$('fecha').value = D.fecha; $('fecha').onchange = (e) => go(e.target.value);\\n$('titulo').textContent = D.fechaTexto.charAt(0).toUpperCase() + D.fechaTexto.slice(1) + (D.cerrado ? ' · cerrado' : '');\\n\\nfunction toast(t) { const el = $('toast'); el.textContent = t; el.style.display = 'block'; setTimeout(() => el.style.display = 'none', 2200); }\\n\\nfunction kpis() {\\n  const act = D.reservas.filter((r) => ['confirmada', 'llegada'].includes(r.estado));\\n  const pax = (t) => act.filter((r) => r.turno === t).reduce((a, r) => a + r.personas, 0);\\n  const k = (titulo, valor, sub, pct) => '<div class=\\\"kpi\\\"><small>' + titulo + '</small><b>' + valor + '</b><small>' + sub + '</small>' + (pct !== undefined ? '<div class=\\\"bar\\\"><i style=\\\"width:' + Math.min(100, pct) + '%\\\"></i></div>' : '') + '</div>';\\n  $('kpis').innerHTML =\\n    k('Comida', pax('comida') + ' / ' + D.aforo.comida, 'comensales', (pax('comida') / D.aforo.comida) * 100) +\\n    k('Cena', pax('cena') + ' / ' + D.aforo.cena, 'comensales', (pax('cena') / D.aforo.cena) * 100) +\\n    k('Reservas', act.length, (() => { const c = act.filter((r) => r.asistencia === 'confirmada').length; return c + (c === 1 ? ' ha' : ' han') + ' confirmado asistencia'; })()) +\\n    k('Llegadas', D.reservas.filter((r) => r.estado === 'llegada').length, D.reservas.filter((r) => r.estado === 'no_show').length + ' no vinieron · ' + D.reservas.filter((r) => r.estado === 'cancelada').length + ' canceladas');\\n}\\n\\nfunction fila(r) {\\n  const tags = [];\\n  if (r.asistencia === 'confirmada') tags.push('<span class=\\\"tag ok\\\">confirmó asistencia</span>');\\n  if (r.origen && r.origen !== 'web') tags.push('<span class=\\\"tag blue\\\">' + esc(r.origen) + '</span>');\\n  if (r.personas >= 6) tags.push('<span class=\\\"tag warn\\\">grupo</span>');\\n  const est = { confirmada: '', llegada: '<span class=\\\"tag ok\\\">llegó</span>', no_show: '<span class=\\\"tag bad\\\">no vino</span>', cancelada: '<span class=\\\"tag bad\\\">cancelada</span>' }[r.estado] || '';\\n  const btns = r.estado === 'confirmada'\\n    ? '<button class=\\\"ok\\\" data-a=\\\"llegada\\\">Llegó</button><button data-a=\\\"no_show\\\">No vino</button><button class=\\\"bad\\\" data-a=\\\"cancelada\\\">Cancelar</button>'\\n    : '<button data-a=\\\"confirmada\\\">Deshacer</button>';\\n  return '<tr class=\\\"' + r.estado + '\\\" data-t=\\\"' + esc(r.token) + '\\\"><td class=\\\"c-hora\\\"><span class=\\\"hora\\\">' + esc(r.hora) + '</span></td><td><b>' + esc(r.nombre) + '</b> ' + est + tags.join('') +\\n    (r.notas ? '<div class=\\\"notas\\\">⚠ ' + esc(r.notas) + '</div>' : '') + '</td><td><span class=\\\"pax\\\">' + r.personas + '</span> pax</td><td><a class=\\\"tel\\\" href=\\\"tel:' + esc(r.telefono) + '\\\">' + esc(tel(r.telefono)) + '</a><br><small style=\\\"color:var(--mute)\\\">' + esc(r.codigo) + '</small></td><td><div class=\\\"acc\\\">' + btns + '</div></td></tr>';\\n}\\n\\nfunction lista() {\\n  if (D.cerrado && !D.reservas.length) { $('lista').innerHTML = '<p class=\\\"vacio\\\">El restaurante cierra este día.</p>'; return; }\\n  let html = '';\\n  for (const t of ['comida', 'cena']) {\\n    const rs = D.reservas.filter((r) => r.turno === t).sort((a, b) => a.hora.localeCompare(b.hora));\\n    html += '<h2>' + (t === 'comida' ? 'Comida' : 'Cena') + ' · ' + rs.filter((r) => ['confirmada', 'llegada'].includes(r.estado)).length + ' reservas</h2>';\\n    html += rs.length ? '<table><thead><tr><th>Hora</th><th>Cliente</th><th>Pax</th><th>Contacto</th><th></th></tr></thead><tbody>' + rs.map(fila).join('') + '</tbody></table>' : '<p class=\\\"vacio\\\">Sin reservas.</p>';\\n  }\\n  $('lista').innerHTML = html;\\n}\\n\\n$('lista').onclick = async (e) => {\\n  const b = e.target.closest('button[data-a]'); if (!b) return;\\n  const tr = b.closest('tr'); b.disabled = true;\\n  const r = await fetch(location.origin + '/webhook/api/panel', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ clave: D.clave, token: tr.dataset.t, estado: b.dataset.a }) });\\n  if (r.ok) { const res = D.reservas.find((x) => x.token === tr.dataset.t); res.estado = b.dataset.a; kpis(); lista(); toast('Guardado'); }\\n  else { b.disabled = false; toast('No se pudo guardar'); }\\n};\\n\\n$('nueva').onsubmit = async (e) => {\\n  e.preventDefault();\\n  const body = Object.fromEntries(new FormData(e.target).entries());\\n  Object.assign(body, { fecha: D.fecha, personas: Number(body.personas), clave: D.clave, origen: 'local' });\\n  const r = await fetch(location.origin + '/webhook/api/reservas', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });\\n  const d = await r.json();\\n  if (r.ok && d.ok) { toast('Reserva ' + d.codigo + ' creada'); setTimeout(() => location.reload(), 600); }\\n  else toast((d.errores || ['Error']).join(' · '));\\n};\\n\\nkpis(); lista();\\n// Se recarga sola cada minuto para ver las reservas nuevas (salvo si se está escribiendo).\\nsetInterval(() => { if (!document.activeElement || !document.activeElement.closest('form')) location.reload(); }, 60000);\\n</script>\\n</body>\\n</html>\\n\".replace(/__NOMBRE__/g, esc(CFG.nombre)).replace('__DATA__', JSON.stringify(datos).replace(/</g, '\\\\u003c'))\nreturn [{ json: { html } }]\n"
+      },
+      "id": "e20cd37e-4d2e-82d3-e763-fd8ac481ec9e",
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "name": "Responder panel",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.html }}",
+        "options": {
+          "responseCode": "={{ $json.status || 200 }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "content-type",
+                "value": "text/html; charset=utf-8"
+              },
+              {
+                "name": "cache-control",
+                "value": "no-store"
+              },
+              {
+                "name": "x-frame-options",
+                "value": "DENY"
+              }
+            ]
+          }
+        }
+      },
+      "id": "0548e853-a23c-c672-c9db-7499f2376154",
+      "position": [
+        720,
+        0
+      ]
+    },
+    {
+      "name": "POST /api/panel",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "webhookId": "c157348c-b34e-37cf-f313-812c2afc3430",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "api/panel",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "adf2199f-9e99-afeb-2ee5-84cdfee7d8a9",
+      "position": [
+        0,
+        220
+      ]
+    },
+    {
+      "name": "Validar cambio de estado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "/* =====================================================================\n * Librería común de los flujos. El generador (scripts/build.mjs) la\n * antepone al código de cada nodo Code, así que aquí se puede usar lo\n * que ofrece n8n: $env, $now (luxon en Europe/Madrid) y DateTime.\n * ===================================================================== */\n\nconst CFG = (() => {\n  const list = (s) => String(s || '').split(',').map((x) => x.trim()).filter(Boolean)\n  const num = (v, d) => (Number.isFinite(Number(v)) && String(v).trim() !== '' ? Number(v) : d)\n  return {\n    nombre: $env.REST_NOMBRE || 'Restaurante',\n    telefono: $env.REST_TELEFONO || '',\n    direccion: $env.REST_DIRECCION || '',\n    remitente: $env.REST_EMAIL_REMITENTE || 'reservas@example.com',\n    dueno: $env.REST_EMAIL_DUENO || '',\n    aforo: { comida: num($env.REST_AFORO_COMIDA, 40), cena: num($env.REST_AFORO_CENA, 40) },\n    franja: num($env.REST_ENTRADAS_FRANJA, 16),\n    horas: { comida: list($env.REST_HORAS_COMIDA), cena: list($env.REST_HORAS_CENA) },\n    cerrado: list($env.REST_DIAS_CERRADO).map(Number),\n    maxPersonas: num($env.REST_MAX_PERSONAS, 10),\n    antelacionMin: num($env.REST_ANTELACION_MIN, 60),\n    diasMax: num($env.REST_DIAS_MAX, 60),\n    resena: $env.REST_URL_RESENA || '',\n    clavePanel: $env.REST_CLAVE_PANEL || '',\n    claveAgente: $env.REST_CLAVE_AGENTE || '',\n    url: String($env.WEBHOOK_URL || '').replace(/\\/$/, ''),\n  }\n})()\n\n/** Estados que ocupan sitio. */\nconst OCUPAN = ['confirmada', 'llegada']\n\nconst hoy = (dias = 0) => $now.plus({ days: dias }).toFormat('yyyy-MM-dd')\n\nfunction turnoDe(hora) {\n  if (CFG.horas.comida.includes(hora)) return 'comida'\n  if (CFG.horas.cena.includes(hora)) return 'cena'\n  return null\n}\n\nfunction fechaLarga(fecha) {\n  const d = DateTime.fromISO(fecha, { zone: $now.zoneName })\n  return d.isValid ? d.setLocale('es').toFormat(\"cccc d 'de' LLLL\") : fecha\n}\n\n/** Filas reales de una Data Table (la consulta vacía devuelve un único item sin id). */\nfunction filas(items) {\n  return items.map((i) => i.json).filter((r) => r && r.id !== undefined)\n}\n\n/**\n * Disponibilidad de un día. Dos límites a la vez:\n *  - aforo del turno (comensales totales en comida o cena),\n *  - ritmo de entradas: comensales que pueden llegar en la misma franja de 30 min.\n * Las horas que ya han pasado (más la antelación mínima) no se ofrecen.\n */\nfunction disponibilidad(fecha, reservas, personas = 2, { ignorarAntelacion = false } = {}) {\n  const d = DateTime.fromISO(fecha, { zone: $now.zoneName })\n  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(fecha) || !d.isValid) return { ok: false, motivo: 'Fecha no válida.' }\n  if (d.startOf('day') < $now.startOf('day')) return { ok: false, motivo: 'Esa fecha ya ha pasado.' }\n  if (d.startOf('day') > $now.plus({ days: CFG.diasMax }).startOf('day')) {\n    return { ok: false, motivo: `Solo se puede reservar con hasta ${CFG.diasMax} días de antelación.` }\n  }\n  if (CFG.cerrado.includes(d.weekday)) return { ok: true, cerrado: true, motivo: `${CFG.nombre} cierra ese día.`, horas: [] }\n\n  const activas = reservas.filter((r) => r.fecha === fecha && OCUPAN.includes(r.estado))\n  const porTurno = { comida: 0, cena: 0 }\n  const porHora = {}\n  for (const r of activas) {\n    const p = Number(r.personas) || 0\n    if (porTurno[r.turno] !== undefined) porTurno[r.turno] += p\n    porHora[r.hora] = (porHora[r.hora] || 0) + p\n  }\n  const limite = $now.plus({ minutes: ignorarAntelacion ? 0 : CFG.antelacionMin })\n  const horas = []\n  for (const turno of ['comida', 'cena']) {\n    for (const hora of CFG.horas[turno]) {\n      const [h, m] = hora.split(':').map(Number)\n      const momento = d.set({ hour: h, minute: m, second: 0, millisecond: 0 })\n      const libre = Math.max(0, Math.min(CFG.aforo[turno] - porTurno[turno], CFG.franja - (porHora[hora] || 0)))\n      const pasada = momento < limite\n      horas.push({ hora, turno, libre, disponible: !pasada && libre >= personas, pasada })\n    }\n  }\n  return {\n    ok: true,\n    cerrado: false,\n    fecha,\n    fechaTexto: fechaLarga(fecha),\n    horas,\n    ocupacion: {\n      comida: { comensales: porTurno.comida, aforo: CFG.aforo.comida },\n      cena: { comensales: porTurno.cena, aforo: CFG.aforo.cena },\n    },\n  }\n}\n\n/** Horas alternativas cercanas (mismo día y días siguientes) para quien no encuentra sitio. */\nfunction alternativas(disp, hora, personas) {\n  if (!disp.ok || disp.cerrado) return []\n  const [h, m] = (hora || '00:00').split(':').map(Number)\n  const minutos = (x) => {\n    const [a, b] = x.split(':').map(Number)\n    return a * 60 + b\n  }\n  return disp.horas\n    .filter((x) => x.disponible && x.libre >= personas)\n    .sort((a, b) => Math.abs(minutos(a.hora) - (h * 60 + m)) - Math.abs(minutos(b.hora) - (h * 60 + m)))\n    .slice(0, 3)\n    .map((x) => x.hora)\n}\n\nfunction limpiarTexto(v, max) {\n  return String(v ?? '').replace(/[\\u0000-\\u001f<>]/g, ' ').replace(/\\s+/g, ' ').trim().slice(0, max)\n}\n\nfunction normalizarTelefono(t) {\n  const d = String(t ?? '').replace(/[^\\d+]/g, '')\n  if (/^[6789]\\d{8}$/.test(d)) return '+34' + d\n  if (/^0034\\d{9}$/.test(d)) return '+' + d.slice(2)\n  if (/^\\+\\d{8,15}$/.test(d)) return d\n  return ''\n}\n\n/** Valida y normaliza los datos de una reserva. */\nfunction validarReserva(b) {\n  const errores = []\n  const datos = {\n    nombre: limpiarTexto(b.nombre, 80),\n    email: String(b.email ?? '').trim().toLowerCase().slice(0, 120),\n    telefono: normalizarTelefono(b.telefono),\n    fecha: String(b.fecha ?? '').trim(),\n    hora: String(b.hora ?? '').trim(),\n    personas: Math.floor(Number(b.personas)),\n    notas: limpiarTexto(b.notas, 300),\n  }\n  if (datos.nombre.length < 2) errores.push('Indica tu nombre.')\n  if (!datos.telefono) errores.push('Indica un teléfono válido.')\n  if (datos.email && !/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(datos.email)) errores.push('El email no es válido.')\n  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(datos.fecha)) errores.push('Elige una fecha.')\n  if (!turnoDe(datos.hora)) errores.push('Elige una hora.')\n  if (!(datos.personas >= 1)) errores.push('Indica el número de personas.')\n  else if (datos.personas > CFG.maxPersonas) {\n    errores.push(`Para grupos de más de ${CFG.maxPersonas} personas llámanos${CFG.telefono ? ' al ' + CFG.telefono : ''}.`)\n  }\n  return { ok: errores.length === 0, errores, datos }\n}\n\nconst crypto = require('crypto')\nconst nuevoToken = () => crypto.randomBytes(18).toString('base64url')\n/** Código corto para decirlo por teléfono: sin 0/O ni 1/I. */\nfunction nuevoCodigo() {\n  const abc = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'\n  let s = ''\n  for (const b of crypto.randomBytes(6)) s += abc[b % abc.length]\n  return s\n}\n\nconst enlace = (token) => `${CFG.url}/webhook/reserva?t=${encodeURIComponent(token)}`\nconst esc = (s) => String(s ?? '').replace(/[&<>\"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' })[c])\n\n/* ----------------------------------------------------------- plantillas */\n\nfunction emailHtml({ titulo, intro, filas: datos = [], botones = [], pie = '' }) {\n  const rows = datos\n    .map(([k, v]) => `<tr><td style=\"padding:6px 0;color:#6b7280;font-size:14px;width:120px\">${esc(k)}</td><td style=\"padding:6px 0;font-size:15px;color:#111827;font-weight:600\">${esc(v)}</td></tr>`)\n    .join('')\n  const btns = botones\n    .map(\n      (b) =>\n        `<a href=\"${esc(b.url)}\" style=\"display:inline-block;margin:6px 8px 0 0;padding:12px 20px;border-radius:10px;text-decoration:none;font-weight:600;font-size:15px;${\n          b.secundario ? 'background:#f3f4f6;color:#111827' : 'background:#111827;color:#ffffff'\n        }\">${esc(b.texto)}</a>`,\n    )\n    .join('')\n  return `<!doctype html><html lang=\"es\"><body style=\"margin:0;background:#f5f5f4;font-family:Arial,Helvetica,sans-serif\">\n<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"padding:24px 12px\"><tr><td align=\"center\">\n<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"max-width:520px;background:#ffffff;border-radius:16px;padding:28px\">\n<tr><td style=\"font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:#9ca3af\">${esc(CFG.nombre)}</td></tr>\n<tr><td style=\"padding-top:8px;font-size:24px;font-weight:700;color:#111827\">${esc(titulo)}</td></tr>\n<tr><td style=\"padding-top:10px;font-size:15px;line-height:1.55;color:#374151\">${intro}</td></tr>\n${rows ? `<tr><td style=\"padding-top:16px\"><table role=\"presentation\" width=\"100%\" style=\"border-top:1px solid #eee;border-bottom:1px solid #eee;padding:8px 0\">${rows}</table></td></tr>` : ''}\n${btns ? `<tr><td style=\"padding-top:18px\">${btns}</td></tr>` : ''}\n<tr><td style=\"padding-top:22px;font-size:13px;line-height:1.5;color:#9ca3af\">${pie || [CFG.direccion, CFG.telefono].filter(Boolean).map(esc).join(' · ')}</td></tr>\n</table></td></tr></table></body></html>`\n}\n\nfunction datosReserva(r) {\n  return [\n    ['Fecha', fechaLarga(r.fecha)],\n    ['Hora', r.hora],\n    ['Personas', String(r.personas)],\n    ['Nombre', r.nombre],\n    ['Código', r.codigo],\n  ].concat(r.notas ? [['Notas', r.notas]] : [])\n}\n\nconst CSS = `*{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#f5f3ef;color:#1c1917}\n.wrap{max-width:560px;margin:0 auto;padding:28px 16px 48px}.card{background:#fff;border-radius:20px;padding:24px;box-shadow:0 1px 2px rgba(0,0,0,.04),0 8px 30px rgba(0,0,0,.05)}\nh1{font-size:28px;margin:0 0 6px;letter-spacing:-.02em}.muted{color:#78716c}.brand{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#a8a29e;margin-bottom:6px}\n.btn{display:inline-block;border:0;border-radius:12px;padding:13px 20px;font-size:16px;font-weight:600;cursor:pointer;text-decoration:none;text-align:center}\n.btn-primary{background:#1c1917;color:#fff}.btn-ghost{background:#f5f5f4;color:#1c1917}.btn-danger{background:#fee2e2;color:#991b1b}\ndl{display:grid;grid-template-columns:110px 1fr;gap:8px 12px;margin:18px 0;padding:16px 0;border-top:1px solid #eee;border-bottom:1px solid #eee}dt{color:#78716c}dd{margin:0;font-weight:600}\n.ok{color:#15803d}.bad{color:#b91c1c}`\n\nfunction pagina(titulo, cuerpo) {\n  return `<!doctype html><html lang=\"es\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"robots\" content=\"noindex\">\n<title>${esc(titulo)} · ${esc(CFG.nombre)}</title><style>${CSS}</style></head><body><div class=\"wrap\"><div class=\"brand\">${esc(CFG.nombre)}</div>${cuerpo}</div></body></html>`\n}\n\nfunction respuesta(status, body) {\n  return [{ json: { status, body } }]\n}\n\n/* ---- Validar cambio de estado ---- */\nconst b = $input.first().json.body || {}\nif (!CFG.clavePanel || b.clave !== CFG.clavePanel) return [{ json: { status: 401, body: { ok: false, error: 'Clave no válida.' } } }]\nif (!['confirmada', 'llegada', 'no_show', 'cancelada'].includes(b.estado) || !b.token) return [{ json: { status: 400, body: { ok: false, error: 'Datos no válidos.' } } }]\nreturn [{ json: { estado: b.estado } }]\n"
+      },
+      "id": "cbd6178c-ad2d-00ea-3afb-ab94001b3a37",
+      "position": [
+        240,
+        220
+      ]
+    },
+    {
+      "name": "¿Cambio válido?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.body === undefined }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "b30ee892-688c-07f6-1b8f-09c021e3e9e2",
+      "position": [
+        480,
+        220
+      ]
+    },
+    {
+      "name": "Cambiar estado",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "parameters": {
+        "resource": "row",
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "__DT_RESERVAS__"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "token",
+              "condition": "eq",
+              "keyValue": "={{ $(\"POST /api/panel\").first().json.body.token }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "a4b3859d-d553-7d70-5f3e-e2d40fbb7db1",
+      "position": [
+        720,
+        160
+      ]
+    },
+    {
+      "name": "Avisar a la espera (panel)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5678/webhook/interno/espera",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ clave: $env.REST_CLAVE_PANEL }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "b0a8241d-d1df-ed4d-8ab5-1e99cefb4424",
+      "position": [
+        960,
+        160
+      ]
+    },
+    {
+      "name": "Responder estado",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ ({ ok: true }) }}",
+        "options": {
+          "responseCode": "={{ 200 }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "cache-control",
+                "value": "no-store"
+              }
+            ]
+          }
+        }
+      },
+      "id": "d827da94-afdb-4fc6-e390-802dbd791eec",
+      "position": [
+        1200,
+        160
+      ]
+    },
+    {
+      "name": "Responder estado no válido",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.body }}",
+        "options": {
+          "responseCode": "={{ $json.status || 200 }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "cache-control",
+                "value": "no-store"
+              }
+            ]
+          }
+        }
+      },
+      "id": "6615d069-60df-6a4f-1ec4-2bf606195dcb",
+      "position": [
+        720,
+        320
+      ]
+    }
+  ],
+  "connections": {
+    "GET /panel": {
+      "main": [
+        [
+          {
+            "node": "Reservas del día (panel)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reservas del día (panel)": {
+      "main": [
+        [
+          {
+            "node": "Pintar panel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pintar panel": {
+      "main": [
+        [
+          {
+            "node": "Responder panel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST /api/panel": {
+      "main": [
+        [
+          {
+            "node": "Validar cambio de estado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar cambio de estado": {
+      "main": [
+        [
+          {
+            "node": "¿Cambio válido?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Cambio válido?": {
+      "main": [
+        [
+          {
+            "node": "Cambiar estado",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Responder estado no válido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cambiar estado": {
+      "main": [
+        [
+          {
+            "node": "Avisar a la espera (panel)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Avisar a la espera (panel)": {
+      "main": [
+        [
+          {
+            "node": "Responder estado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "none",
+    "callerPolicy": "workflowsFromSameOwner"
+  }
+}

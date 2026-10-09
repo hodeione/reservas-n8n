@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Reservar mesa · __NOMBRE__</title>
+<meta name="description" content="Reserva mesa en __NOMBRE__ en un minuto." />
+<style>
+  *{box-sizing:border-box}
+  :root{--bg:#f6f2ea;--card:#fff;--ink:#1d1a16;--mute:#7a7268;--line:#e8e1d6;--acc:#b4532a;--acc-ink:#fff;--ok:#2f7a3f}
+  body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  .wrap{max-width:620px;margin:0 auto;padding:28px 16px 64px}
+  header h1{font:600 34px/1.1 Georgia,"Times New Roman",serif;margin:4px 0 6px;letter-spacing:-.01em}
+  header p{margin:0;color:var(--mute);font-size:14px}
+  .eyebrow{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--acc);font-weight:700}
+  .card{background:var(--card);border-radius:22px;padding:22px;margin-top:18px;box-shadow:0 1px 2px rgba(0,0,0,.04),0 12px 32px rgba(60,40,20,.06)}
+  .step{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--mute);font-weight:700;margin:0 0 10px}
+  .row{display:flex;align-items:center;gap:12px}
+  .stepper{display:flex;align-items:center;border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  .stepper button{width:46px;height:46px;border:0;background:#faf7f2;font-size:22px;cursor:pointer;color:var(--ink)}
+  .stepper span{min-width:64px;text-align:center;font-weight:700;font-size:18px}
+  .days{display:flex;gap:8px;overflow-x:auto;padding:2px 2px 8px;scrollbar-width:thin}
+  .day{flex:0 0 auto;width:66px;border:1px solid var(--line);border-radius:14px;padding:8px 4px;text-align:center;background:#fff;cursor:pointer;color:var(--ink)}
+  .day b{display:block;font-size:20px}
+  .day small{display:block;font-size:11px;text-transform:uppercase;color:var(--mute);letter-spacing:.06em}
+  .day[aria-pressed=true]{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .day[aria-pressed=true] small{color:#d6cfc4}
+  .day:disabled{opacity:.35;cursor:not-allowed;text-decoration:line-through}
+  .slots h3{font-size:14px;margin:14px 0 8px;color:var(--mute);font-weight:600}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(82px,1fr));gap:8px}
+  .slot{border:1px solid var(--line);border-radius:12px;padding:11px 0;background:#fff;font-weight:700;font-size:15px;cursor:pointer;color:var(--ink)}
+  .slot[aria-pressed=true]{background:var(--acc);border-color:var(--acc);color:var(--acc-ink)}
+  .slot:disabled{color:#c9c1b5;background:#faf8f4;cursor:not-allowed;text-decoration:line-through}
+  label{display:block;font-size:13px;font-weight:600;margin:12px 0 6px}
+  input,textarea{width:100%;border:1px solid var(--line);border-radius:12px;padding:12px 14px;font:inherit;background:#fff;color:var(--ink)}
+  input:focus,textarea:focus{outline:2px solid var(--acc);border-color:transparent}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .btn{display:block;width:100%;border:0;border-radius:14px;padding:16px;font:700 17px system-ui;background:var(--ink);color:#fff;cursor:pointer;margin-top:12px;text-decoration:none;text-align:center}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  .btn.alt{background:var(--acc)}
+  .btn.ghost{background:#f1ece4;color:var(--ink)}
+  .note{font-size:12px;color:var(--mute);margin-top:10px}
+  .msg{border-radius:14px;padding:12px 14px;margin-top:12px;font-size:14px}
+  .msg.err{background:#fdecea;color:#8a1c12}
+  .msg.info{background:#f1ece4}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+  .chips button{border:1px solid var(--acc);color:var(--acc);background:#fff;border-radius:999px;padding:6px 14px;font-weight:700;cursor:pointer}
+  .hp{position:absolute;left:-9999px}
+  .done{text-align:center}
+  .done .big{font:600 30px Georgia,serif;margin:6px 0}
+  .code{display:inline-block;font:700 22px ui-monospace,Consolas,monospace;letter-spacing:.16em;background:#f1ece4;border-radius:12px;padding:8px 16px;margin:10px 0}
+  dl{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;text-align:left;margin:16px 0}
+  dt{color:var(--mute)}dd{margin:0;font-weight:600}
+  .skeleton{height:46px;border-radius:12px;background:linear-gradient(90deg,#f1ece4,#faf7f2,#f1ece4);background-size:200% 100%;animation:sk 1.2s infinite}
+  @keyframes sk{to{background-position:-200% 0}}
+  @media (max-width:420px){.two{grid-template-columns:1fr}header h1{font-size:28px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Reservas online</div>
+    <h1>__NOMBRE__</h1>
+    <p>__DIRECCION__</p>
+  </header>
+
+  <main id="app">
+    <section class="card">
+      <p class="step">1 · ¿Cuántos sois?</p>
+      <div class="row">
+        <div class="stepper" role="group" aria-label="Número de personas">
+          <button type="button" id="menos" aria-label="Una persona menos">−</button>
+          <span id="personas" aria-live="polite">2</span>
+          <button type="button" id="mas" aria-label="Una persona más">+</button>
+        </div>
+        <span class="note" id="grupos"></span>
+      </div>
+    </section>
+
+    <section class="card">
+      <p class="step">2 · ¿Qué día?</p>
+      <div class="days" id="dias" role="group" aria-label="Día"></div>
+      <label for="otra">O elige otra fecha</label>
+      <input type="date" id="otra" />
+    </section>
+
+    <section class="card slots" id="horasCard">
+      <p class="step">3 · ¿A qué hora?</p>
+      <div id="horas"><p class="note">Elige un día para ver las horas libres.</p></div>
+    </section>
+
+    <section class="card" id="datosCard" hidden>
+      <p class="step">4 · Tus datos</p>
+      <form id="form" novalidate>
+        <label for="nombre">Nombre</label>
+        <input id="nombre" name="nombre" autocomplete="name" required maxlength="80" />
+        <div class="two">
+          <div><label for="telefono">Teléfono</label><input id="telefono" name="telefono" type="tel" autocomplete="tel" required inputmode="tel" /></div>
+          <div><label for="email">Email <span class="note">(para la confirmación)</span></label><input id="email" name="email" type="email" autocomplete="email" /></div>
+        </div>
+        <label for="notas">¿Algo que debamos saber? <span class="note">(alergias, trona, celebración…)</span></label>
+        <textarea id="notas" name="notas" rows="2" maxlength="300"></textarea>
+        <input class="hp" name="web" tabindex="-1" autocomplete="off" aria-hidden="true" />
+        <button class="btn" id="enviar" type="submit">Confirmar reserva</button>
+        <p class="note">Solo usaremos tus datos para gestionar esta reserva. Recibirás un recordatorio el día anterior.</p>
+        <div id="error" role="alert"></div>
+      </form>
+    </section>
+  </main>
+</div>
+
+<script>
+const CFG = __CONFIG__;
+const API = location.origin + '/webhook/api';
+const $ = (id) => document.getElementById(id);
+const state = { personas: 2, fecha: null, hora: null, disp: null };
+const pad = (n) => String(n).padStart(2, '0');
+const iso = (d) => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+const DIAS = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+
+function pintarPersonas() {
+  $('personas').textContent = state.personas + (state.personas === 1 ? ' persona' : ' personas');
+  $('menos').disabled = state.personas <= 1;
+  $('mas').disabled = state.personas >= CFG.maxPersonas;
+  $('grupos').textContent = state.personas >= CFG.maxPersonas ? 'Grupos mayores, por teléfono' + (CFG.telefono ? ': ' + CFG.telefono : '') : '';
+}
+$('menos').onclick = () => { state.personas--; pintarPersonas(); if (state.fecha) cargarHoras(); };
+$('mas').onclick = () => { state.personas++; pintarPersonas(); if (state.fecha) cargarHoras(); };
+
+function pintarDias() {
+  const hoy = new Date();
+  let html = '';
+  for (let i = 0; i < 14; i++) {
+    const d = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() + i);
+    const dow = d.getDay() === 0 ? 7 : d.getDay();
+    const cerrado = CFG.cerrado.includes(dow);
+    const etiqueta = i === 0 ? 'hoy' : i === 1 ? 'mañana' : DIAS[d.getDay()];
+    html += '<button type="button" class="day" data-f="' + iso(d) + '" aria-pressed="false"' + (cerrado ? ' disabled title="Cerrado"' : '') + '><small>' + etiqueta + '</small><b>' + d.getDate() + '</b></button>';
+  }
+  $('dias').innerHTML = html;
+  $('otra').min = iso(hoy);
+  const max = new Date(); max.setDate(max.getDate() + CFG.diasMax); $('otra').max = iso(max);
+}
+$('dias').onclick = (e) => { const b = e.target.closest('.day'); if (b && !b.disabled) elegirFecha(b.dataset.f); };
+$('otra').onchange = (e) => e.target.value && elegirFecha(e.target.value);
+
+function elegirFecha(f) {
+  state.fecha = f; state.hora = null;
+  document.querySelectorAll('.day').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.f === f)));
+  $('datosCard').hidden = true;
+  cargarHoras();
+}
+
+async function cargarHoras() {
+  $('horas').innerHTML = '<div class="grid"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div>';
+  try {
+    const r = await fetch(API + '/disponibilidad?fecha=' + state.fecha + '&personas=' + state.personas);
+    const d = await r.json();
+    state.disp = d;
+    if (!r.ok || d.error) { $('horas').innerHTML = '<div class="msg err">' + esc(d.error || 'No se pudo consultar.') + '</div>'; return; }
+    if (d.cerrado) { $('horas').innerHTML = '<div class="msg info">' + esc(d.motivo) + '</div>'; return; }
+    let html = '';
+    for (const turno of ['comida', 'cena']) {
+      const hs = d.horas.filter((h) => h.turno === turno);
+      if (!hs.length) continue;
+      html += '<h3>' + (turno === 'comida' ? 'Comida' : 'Cena') + '</h3><div class="grid">' +
+        hs.map((h) => '<button type="button" class="slot" data-h="' + h.hora + '" aria-pressed="' + (state.hora === h.hora) + '"' + (h.disponible ? '' : ' disabled') + '>' + h.hora + '</button>').join('') + '</div>';
+    }
+    if (!d.horas.some((h) => h.disponible)) html += '<div class="msg info">No queda sitio para ' + state.personas + ' ese día. Prueba otro día o apúntate a la lista de espera.</div><button class="btn ghost" type="button" id="esperaDia">Apuntarme a la lista de espera</button>';
+    $('horas').innerHTML = html;
+    const ed = $('esperaDia'); if (ed) ed.onclick = () => { state.hora = null; state.espera = true; mostrarDatos(); };
+  } catch { $('horas').innerHTML = '<div class="msg err">Sin conexión. Inténtalo de nuevo.</div>'; }
+}
+$('horas').onclick = (e) => {
+  const b = e.target.closest('.slot'); if (!b || b.disabled) return;
+  state.hora = b.dataset.h; state.espera = false;
+  document.querySelectorAll('.slot').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.h === state.hora)));
+  mostrarDatos();
+};
+function mostrarDatos() {
+  $('datosCard').hidden = false;
+  $('enviar').textContent = state.espera ? 'Apuntarme a la lista de espera' : 'Confirmar reserva · ' + state.hora;
+  $('enviar').className = state.espera ? 'btn alt' : 'btn';
+  $('datosCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  setTimeout(() => { const n = $('nombre'); if (n) n.focus({ preventScroll: true }); }, 400);
+}
+
+$('form').onsubmit = async (e) => {
+  e.preventDefault();
+  const f = new FormData(e.target);
+  const body = Object.fromEntries(f.entries());
+  Object.assign(body, { fecha: state.fecha, hora: state.hora || (state.disp && state.disp.horas.find((h) => !h.pasada) || {}).hora, personas: state.personas });
+  $('error').innerHTML = '';
+  $('enviar').disabled = true;
+  const prev = $('enviar').textContent; $('enviar').textContent = 'Enviando…';
+  try {
+    const r = await fetch(API + (state.espera ? '/espera' : '/reservas'), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const d = await r.json();
+    if (r.ok && d.ok) return state.espera ? hechoEspera(d) : hecho(d);
+    let html = '<div class="msg err">' + (d.errores || ['No se pudo completar.']).map(esc).join('<br>') + '</div>';
+    if (d.alternativas && d.alternativas.length) html += '<p class="note">Horas libres cerca:</p><div class="chips">' + d.alternativas.map((h) => '<button type="button" data-h="' + h + '">' + h + '</button>').join('') + '</div>';
+    if (d.lista_espera) html += '<button class="btn ghost" type="button" id="aEspera">Apuntarme a la lista de espera de las ' + esc(body.hora) + '</button>';
+    $('error').innerHTML = html;
+    $('error').querySelectorAll('.chips button').forEach((b) => b.onclick = () => { state.hora = b.dataset.h; cargarHoras(); mostrarDatos(); $('error').innerHTML = ''; });
+    const ae = $('aEspera'); if (ae) ae.onclick = () => { state.espera = true; mostrarDatos(); $('form').requestSubmit(); };
+  } catch { $('error').innerHTML = '<div class="msg err">Sin conexión. Inténtalo de nuevo.</div>'; }
+  finally { const b = $('enviar'); if (b) { b.disabled = false; b.textContent = prev; } }
+};
+
+function calendario(d) {
+  const [y, m, dd] = d.fecha.split('-'); const [h, mi] = d.hora.split(':');
+  const ini = y + m + dd + 'T' + h + mi + '00';
+  const finD = new Date(+y, +m - 1, +dd, +h + 2, +mi);
+  const fin = finD.getFullYear() + pad(finD.getMonth() + 1) + pad(finD.getDate()) + 'T' + pad(finD.getHours()) + pad(finD.getMinutes()) + '00';
+  return 'https://calendar.google.com/calendar/render?action=TEMPLATE&text=' + encodeURIComponent('Reserva en ' + CFG.nombre) + '&dates=' + ini + '/' + fin + '&ctz=Europe/Madrid&location=' + encodeURIComponent(CFG.direccion) + '&details=' + encodeURIComponent('Código de reserva: ' + d.codigo);
+}
+function hecho(d) {
+  $('app').dataset.done = '1';
+  $('app').innerHTML = '<section class="card done"><div class="eyebrow">Reserva confirmada</div><div class="big">¡Te esperamos!</div>' +
+    '<div class="code">' + esc(d.codigo) + '</div><dl><dt>Día</dt><dd>' + esc(d.fechaTexto) + '</dd><dt>Hora</dt><dd>' + esc(d.hora) + '</dd><dt>Personas</dt><dd>' + d.personas + '</dd><dt>A nombre de</dt><dd>' + esc(d.nombre) + '</dd></dl>' +
+    '<p class="note">' + (d.email ? 'Te hemos enviado la confirmación a ' + esc(d.email) + '. ' : '') + 'Si no puedes venir, cancélala para que otra persona aproveche la mesa.</p>' +
+    '<a class="btn" href="' + calendario(d) + '" target="_blank" rel="noopener">Añadir a mi calendario</a>' +
+    '<a class="btn ghost" href="' + esc(d.gestionar) + '">Ver o cancelar la reserva</a></section>';
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+function hechoEspera(d) {
+  $('app').dataset.done = '1';
+  $('app').innerHTML = '<section class="card done"><div class="eyebrow">Lista de espera</div><div class="big">Estás en la lista</div>' +
+    '<p>Si se libera sitio el ' + esc(d.fechaTexto) + ' te reservamos la mesa automáticamente y te avisamos' + (d.email ? ' por email' : '') + '.</p></section>';
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+pintarPersonas();
+pintarDias();
+</script>
+</body>
+</html>

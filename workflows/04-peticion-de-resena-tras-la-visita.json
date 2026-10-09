@@ -1,0 +1,226 @@
+{
+  "name": "04 · Petición de reseña tras la visita",
+  "nodes": [
+    {
+      "name": "Cada día a las 12",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 12
+            }
+          ]
+        }
+      },
+      "id": "b4140161-38b7-4447-4a42-dcbd8eae4cb3",
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "name": "Ejecutar ahora",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "webhookId": "51d40255-2de0-d724-388e-6939b4967118",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "tareas/resenas",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "339096ac-f57d-7169-2733-a7a5b880aa58",
+      "position": [
+        0,
+        200
+      ]
+    },
+    {
+      "name": "Reservas de ayer",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "alwaysOutputData": true,
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "__DT_RESERVAS__"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "fecha",
+              "condition": "eq",
+              "keyValue": "={{ $now.minus({ days: 1 }).toFormat(\"yyyy-MM-dd\") }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "id": "e5bb19ab-7a5c-a86a-e682-5e298a0e830b",
+      "position": [
+        260,
+        100
+      ]
+    },
+    {
+      "name": "Preparar reseñas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "/* =====================================================================\n * Librería común de los flujos. El generador (scripts/build.mjs) la\n * antepone al código de cada nodo Code, así que aquí se puede usar lo\n * que ofrece n8n: $env, $now (luxon en Europe/Madrid) y DateTime.\n * ===================================================================== */\n\nconst CFG = (() => {\n  const list = (s) => String(s || '').split(',').map((x) => x.trim()).filter(Boolean)\n  const num = (v, d) => (Number.isFinite(Number(v)) && String(v).trim() !== '' ? Number(v) : d)\n  return {\n    nombre: $env.REST_NOMBRE || 'Restaurante',\n    telefono: $env.REST_TELEFONO || '',\n    direccion: $env.REST_DIRECCION || '',\n    remitente: $env.REST_EMAIL_REMITENTE || 'reservas@example.com',\n    dueno: $env.REST_EMAIL_DUENO || '',\n    aforo: { comida: num($env.REST_AFORO_COMIDA, 40), cena: num($env.REST_AFORO_CENA, 40) },\n    franja: num($env.REST_ENTRADAS_FRANJA, 16),\n    horas: { comida: list($env.REST_HORAS_COMIDA), cena: list($env.REST_HORAS_CENA) },\n    cerrado: list($env.REST_DIAS_CERRADO).map(Number),\n    maxPersonas: num($env.REST_MAX_PERSONAS, 10),\n    antelacionMin: num($env.REST_ANTELACION_MIN, 60),\n    diasMax: num($env.REST_DIAS_MAX, 60),\n    resena: $env.REST_URL_RESENA || '',\n    clavePanel: $env.REST_CLAVE_PANEL || '',\n    claveAgente: $env.REST_CLAVE_AGENTE || '',\n    url: String($env.WEBHOOK_URL || '').replace(/\\/$/, ''),\n  }\n})()\n\n/** Estados que ocupan sitio. */\nconst OCUPAN = ['confirmada', 'llegada']\n\nconst hoy = (dias = 0) => $now.plus({ days: dias }).toFormat('yyyy-MM-dd')\n\nfunction turnoDe(hora) {\n  if (CFG.horas.comida.includes(hora)) return 'comida'\n  if (CFG.horas.cena.includes(hora)) return 'cena'\n  return null\n}\n\nfunction fechaLarga(fecha) {\n  const d = DateTime.fromISO(fecha, { zone: $now.zoneName })\n  return d.isValid ? d.setLocale('es').toFormat(\"cccc d 'de' LLLL\") : fecha\n}\n\n/** Filas reales de una Data Table (la consulta vacía devuelve un único item sin id). */\nfunction filas(items) {\n  return items.map((i) => i.json).filter((r) => r && r.id !== undefined)\n}\n\n/**\n * Disponibilidad de un día. Dos límites a la vez:\n *  - aforo del turno (comensales totales en comida o cena),\n *  - ritmo de entradas: comensales que pueden llegar en la misma franja de 30 min.\n * Las horas que ya han pasado (más la antelación mínima) no se ofrecen.\n */\nfunction disponibilidad(fecha, reservas, personas = 2, { ignorarAntelacion = false } = {}) {\n  const d = DateTime.fromISO(fecha, { zone: $now.zoneName })\n  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(fecha) || !d.isValid) return { ok: false, motivo: 'Fecha no válida.' }\n  if (d.startOf('day') < $now.startOf('day')) return { ok: false, motivo: 'Esa fecha ya ha pasado.' }\n  if (d.startOf('day') > $now.plus({ days: CFG.diasMax }).startOf('day')) {\n    return { ok: false, motivo: `Solo se puede reservar con hasta ${CFG.diasMax} días de antelación.` }\n  }\n  if (CFG.cerrado.includes(d.weekday)) return { ok: true, cerrado: true, motivo: `${CFG.nombre} cierra ese día.`, horas: [] }\n\n  const activas = reservas.filter((r) => r.fecha === fecha && OCUPAN.includes(r.estado))\n  const porTurno = { comida: 0, cena: 0 }\n  const porHora = {}\n  for (const r of activas) {\n    const p = Number(r.personas) || 0\n    if (porTurno[r.turno] !== undefined) porTurno[r.turno] += p\n    porHora[r.hora] = (porHora[r.hora] || 0) + p\n  }\n  const limite = $now.plus({ minutes: ignorarAntelacion ? 0 : CFG.antelacionMin })\n  const horas = []\n  for (const turno of ['comida', 'cena']) {\n    for (const hora of CFG.horas[turno]) {\n      const [h, m] = hora.split(':').map(Number)\n      const momento = d.set({ hour: h, minute: m, second: 0, millisecond: 0 })\n      const libre = Math.max(0, Math.min(CFG.aforo[turno] - porTurno[turno], CFG.franja - (porHora[hora] || 0)))\n      const pasada = momento < limite\n      horas.push({ hora, turno, libre, disponible: !pasada && libre >= personas, pasada })\n    }\n  }\n  return {\n    ok: true,\n    cerrado: false,\n    fecha,\n    fechaTexto: fechaLarga(fecha),\n    horas,\n    ocupacion: {\n      comida: { comensales: porTurno.comida, aforo: CFG.aforo.comida },\n      cena: { comensales: porTurno.cena, aforo: CFG.aforo.cena },\n    },\n  }\n}\n\n/** Horas alternativas cercanas (mismo día y días siguientes) para quien no encuentra sitio. */\nfunction alternativas(disp, hora, personas) {\n  if (!disp.ok || disp.cerrado) return []\n  const [h, m] = (hora || '00:00').split(':').map(Number)\n  const minutos = (x) => {\n    const [a, b] = x.split(':').map(Number)\n    return a * 60 + b\n  }\n  return disp.horas\n    .filter((x) => x.disponible && x.libre >= personas)\n    .sort((a, b) => Math.abs(minutos(a.hora) - (h * 60 + m)) - Math.abs(minutos(b.hora) - (h * 60 + m)))\n    .slice(0, 3)\n    .map((x) => x.hora)\n}\n\nfunction limpiarTexto(v, max) {\n  return String(v ?? '').replace(/[\\u0000-\\u001f<>]/g, ' ').replace(/\\s+/g, ' ').trim().slice(0, max)\n}\n\nfunction normalizarTelefono(t) {\n  const d = String(t ?? '').replace(/[^\\d+]/g, '')\n  if (/^[6789]\\d{8}$/.test(d)) return '+34' + d\n  if (/^0034\\d{9}$/.test(d)) return '+' + d.slice(2)\n  if (/^\\+\\d{8,15}$/.test(d)) return d\n  return ''\n}\n\n/** Valida y normaliza los datos de una reserva. */\nfunction validarReserva(b) {\n  const errores = []\n  const datos = {\n    nombre: limpiarTexto(b.nombre, 80),\n    email: String(b.email ?? '').trim().toLowerCase().slice(0, 120),\n    telefono: normalizarTelefono(b.telefono),\n    fecha: String(b.fecha ?? '').trim(),\n    hora: String(b.hora ?? '').trim(),\n    personas: Math.floor(Number(b.personas)),\n    notas: limpiarTexto(b.notas, 300),\n  }\n  if (datos.nombre.length < 2) errores.push('Indica tu nombre.')\n  if (!datos.telefono) errores.push('Indica un teléfono válido.')\n  if (datos.email && !/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(datos.email)) errores.push('El email no es válido.')\n  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(datos.fecha)) errores.push('Elige una fecha.')\n  if (!turnoDe(datos.hora)) errores.push('Elige una hora.')\n  if (!(datos.personas >= 1)) errores.push('Indica el número de personas.')\n  else if (datos.personas > CFG.maxPersonas) {\n    errores.push(`Para grupos de más de ${CFG.maxPersonas} personas llámanos${CFG.telefono ? ' al ' + CFG.telefono : ''}.`)\n  }\n  return { ok: errores.length === 0, errores, datos }\n}\n\nconst crypto = require('crypto')\nconst nuevoToken = () => crypto.randomBytes(18).toString('base64url')\n/** Código corto para decirlo por teléfono: sin 0/O ni 1/I. */\nfunction nuevoCodigo() {\n  const abc = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'\n  let s = ''\n  for (const b of crypto.randomBytes(6)) s += abc[b % abc.length]\n  return s\n}\n\nconst enlace = (token) => `${CFG.url}/webhook/reserva?t=${encodeURIComponent(token)}`\nconst esc = (s) => String(s ?? '').replace(/[&<>\"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' })[c])\n\n/* ----------------------------------------------------------- plantillas */\n\nfunction emailHtml({ titulo, intro, filas: datos = [], botones = [], pie = '' }) {\n  const rows = datos\n    .map(([k, v]) => `<tr><td style=\"padding:6px 0;color:#6b7280;font-size:14px;width:120px\">${esc(k)}</td><td style=\"padding:6px 0;font-size:15px;color:#111827;font-weight:600\">${esc(v)}</td></tr>`)\n    .join('')\n  const btns = botones\n    .map(\n      (b) =>\n        `<a href=\"${esc(b.url)}\" style=\"display:inline-block;margin:6px 8px 0 0;padding:12px 20px;border-radius:10px;text-decoration:none;font-weight:600;font-size:15px;${\n          b.secundario ? 'background:#f3f4f6;color:#111827' : 'background:#111827;color:#ffffff'\n        }\">${esc(b.texto)}</a>`,\n    )\n    .join('')\n  return `<!doctype html><html lang=\"es\"><body style=\"margin:0;background:#f5f5f4;font-family:Arial,Helvetica,sans-serif\">\n<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"padding:24px 12px\"><tr><td align=\"center\">\n<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"max-width:520px;background:#ffffff;border-radius:16px;padding:28px\">\n<tr><td style=\"font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:#9ca3af\">${esc(CFG.nombre)}</td></tr>\n<tr><td style=\"padding-top:8px;font-size:24px;font-weight:700;color:#111827\">${esc(titulo)}</td></tr>\n<tr><td style=\"padding-top:10px;font-size:15px;line-height:1.55;color:#374151\">${intro}</td></tr>\n${rows ? `<tr><td style=\"padding-top:16px\"><table role=\"presentation\" width=\"100%\" style=\"border-top:1px solid #eee;border-bottom:1px solid #eee;padding:8px 0\">${rows}</table></td></tr>` : ''}\n${btns ? `<tr><td style=\"padding-top:18px\">${btns}</td></tr>` : ''}\n<tr><td style=\"padding-top:22px;font-size:13px;line-height:1.5;color:#9ca3af\">${pie || [CFG.direccion, CFG.telefono].filter(Boolean).map(esc).join(' · ')}</td></tr>\n</table></td></tr></table></body></html>`\n}\n\nfunction datosReserva(r) {\n  return [\n    ['Fecha', fechaLarga(r.fecha)],\n    ['Hora', r.hora],\n    ['Personas', String(r.personas)],\n    ['Nombre', r.nombre],\n    ['Código', r.codigo],\n  ].concat(r.notas ? [['Notas', r.notas]] : [])\n}\n\nconst CSS = `*{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#f5f3ef;color:#1c1917}\n.wrap{max-width:560px;margin:0 auto;padding:28px 16px 48px}.card{background:#fff;border-radius:20px;padding:24px;box-shadow:0 1px 2px rgba(0,0,0,.04),0 8px 30px rgba(0,0,0,.05)}\nh1{font-size:28px;margin:0 0 6px;letter-spacing:-.02em}.muted{color:#78716c}.brand{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#a8a29e;margin-bottom:6px}\n.btn{display:inline-block;border:0;border-radius:12px;padding:13px 20px;font-size:16px;font-weight:600;cursor:pointer;text-decoration:none;text-align:center}\n.btn-primary{background:#1c1917;color:#fff}.btn-ghost{background:#f5f5f4;color:#1c1917}.btn-danger{background:#fee2e2;color:#991b1b}\ndl{display:grid;grid-template-columns:110px 1fr;gap:8px 12px;margin:18px 0;padding:16px 0;border-top:1px solid #eee;border-bottom:1px solid #eee}dt{color:#78716c}dd{margin:0;font-weight:600}\n.ok{color:#15803d}.bad{color:#b91c1c}`\n\nfunction pagina(titulo, cuerpo) {\n  return `<!doctype html><html lang=\"es\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"robots\" content=\"noindex\">\n<title>${esc(titulo)} · ${esc(CFG.nombre)}</title><style>${CSS}</style></head><body><div class=\"wrap\"><div class=\"brand\">${esc(CFG.nombre)}</div>${cuerpo}</div></body></html>`\n}\n\nfunction respuesta(status, body) {\n  return [{ json: { status, body } }]\n}\n\n/* ---- Preparar reseñas ---- */\nif ($('Ejecutar ahora').isExecuted && ($('Ejecutar ahora').first().json.body || {}).clave !== CFG.clavePanel) return []\nif (!CFG.resena) return []\n// Solo a quien vino (o a quien no se marcó como ausente) y una sola vez.\nreturn filas($input.all())\n  .filter((r) => ['llegada', 'confirmada'].includes(r.estado) && r.email && !r.resena)\n  .map((r) => ({ json: {\n    token: r.token,\n    para: r.email,\n    asunto: '¿Qué tal ayer en ' + CFG.nombre + '?',\n    html: emailHtml({\n      titulo: 'Gracias por venir',\n      intro: 'Hola ' + esc(r.nombre.split(' ')[0]) + ', esperamos que disfrutarais. Tu opinión nos ayuda muchísimo a que más gente nos conozca. ¿Nos dejas una reseña? Es un minuto.',\n      botones: [{ texto: '★★★★★ Dejar reseña en Google', url: CFG.resena }],\n      pie: 'Si algo no estuvo a la altura, responde a este email: lo leemos personalmente.',\n    }),\n  } }))\n"
+      },
+      "id": "0e0c20d6-3f15-381f-c185-4424e543d7cf",
+      "position": [
+        520,
+        100
+      ]
+    },
+    {
+      "name": "Enviar petición de reseña",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "smtp": {
+          "id": "__SMTP__",
+          "name": "SMTP restaurante"
+        }
+      },
+      "parameters": {
+        "fromEmail": "={{ $env.REST_NOMBRE }} <{{ $env.REST_EMAIL_REMITENTE }}>",
+        "toEmail": "={{ $json.para }}",
+        "subject": "={{ $json.asunto }}",
+        "emailFormat": "html",
+        "html": "={{ $json.html }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "82d90a97-94df-fea1-21c5-0377185e120f",
+      "position": [
+        780,
+        100
+      ]
+    },
+    {
+      "name": "Marcar reseña pedida",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "parameters": {
+        "resource": "row",
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "__DT_RESERVAS__"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "token",
+              "condition": "eq",
+              "keyValue": "={{ $(\"Preparar reseñas\").item.json.token }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "resena": "={{ true }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "resena",
+              "displayName": "resena",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "boolean"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "9e965202-aabd-edad-171b-77fcffaa22f3",
+      "position": [
+        1040,
+        100
+      ]
+    }
+  ],
+  "connections": {
+    "Cada día a las 12": {
+      "main": [
+        [
+          {
+            "node": "Reservas de ayer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ejecutar ahora": {
+      "main": [
+        [
+          {
+            "node": "Reservas de ayer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reservas de ayer": {
+      "main": [
+        [
+          {
+            "node": "Preparar reseñas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar reseñas": {
+      "main": [
+        [
+          {
+            "node": "Enviar petición de reseña",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar petición de reseña": {
+      "main": [
+        [
+          {
+            "node": "Marcar reseña pedida",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "none",
+    "callerPolicy": "workflowsFromSameOwner"
+  }
+}

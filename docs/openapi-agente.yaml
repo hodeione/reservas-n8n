@@ -1,0 +1,106 @@
+openapi: 3.0.3
+info:
+  title: Reservas del restaurante · herramientas del recepcionista de IA
+  version: 1.0.0
+  description: >
+    Tres herramientas para un agente de voz o de chat (ElevenLabs Agents, Vapi, Retell,
+    OpenAI Realtime, etc.). Las de escritura exigen la cabecera x-api-key con REST_CLAVE_AGENTE.
+servers:
+  - url: https://reservas.tu-dominio.es/webhook
+components:
+  securitySchemes:
+    clave:
+      type: apiKey
+      in: header
+      name: x-api-key
+paths:
+  /api/disponibilidad:
+    get:
+      operationId: consultar_disponibilidad
+      summary: Horas libres para un día y un número de personas.
+      description: Úsala siempre antes de ofrecer horas. Devuelve "resumen", una frase lista para leer al cliente.
+      parameters:
+        - { name: fecha, in: query, required: true, schema: { type: string, format: date }, description: "AAAA-MM-DD" }
+        - { name: personas, in: query, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '200':
+          description: Disponibilidad
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  fechaTexto: { type: string, example: sábado 10 de octubre }
+                  cerrado: { type: boolean }
+                  resumen: { type: string, example: El sábado 10 de octubre hay sitio para 2 a las 13:00, 13:30, 21:30. }
+                  horas:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        hora: { type: string, example: '21:00' }
+                        turno: { type: string, enum: [comida, cena] }
+                        disponible: { type: boolean }
+        '400': { description: Fecha no válida o fuera de plazo }
+  /api/reservas:
+    post:
+      operationId: crear_reserva
+      summary: Crea la reserva. Confirma antes los datos con el cliente.
+      security: [{ clave: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nombre, telefono, fecha, hora, personas]
+              properties:
+                nombre: { type: string }
+                telefono: { type: string, description: Número del cliente (el de la llamada si lo confirma) }
+                email: { type: string, description: Opcional. Si lo da, recibe la confirmación por email. }
+                fecha: { type: string, format: date }
+                hora: { type: string, example: '21:00', description: Una de las horas disponibles }
+                personas: { type: integer, minimum: 1 }
+                notas: { type: string, description: Alergias, trona, celebración… }
+                origen: { type: string, enum: [ia], default: ia }
+      responses:
+        '201':
+          description: Reserva creada. Lee al cliente el código letra a letra.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  codigo: { type: string, example: DENG7N }
+                  fechaTexto: { type: string }
+                  hora: { type: string }
+        '409':
+          description: Sin sitio o reserva duplicada. Ofrece "alternativas" si las hay.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errores: { type: array, items: { type: string } }
+                  alternativas: { type: array, items: { type: string } }
+        '400': { description: Datos incompletos o no válidos (lee "errores") }
+  /api/cancelar:
+    post:
+      operationId: cancelar_reserva
+      summary: Cancela una reserva con su código y el teléfono con el que se hizo.
+      security: [{ clave: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [codigo, telefono]
+              properties:
+                codigo: { type: string }
+                telefono: { type: string }
+      responses:
+        '200': { description: Cancelada. El sitio pasa automáticamente a la lista de espera. }
+        '404': { description: No coincide el código con el teléfono }
+        '409': { description: Ya estaba cancelada o es de un día pasado }
