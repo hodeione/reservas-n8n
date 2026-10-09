@@ -45,7 +45,8 @@ export function DemoBarra() {
 /** Primera visita a la demo: qué se puede probar. */
 export function DemoBienvenida() {
   const [visto, setVisto] = useGuardado('demo-bienvenida', false)
-  if (!DEMO || visto) return null
+  // Incrustada en otra web (p. ej. el móvil de la página de proyectos) no se muestra.
+  if (!DEMO || visto || window.self !== window.top) return null
   const cerrar = () => setVisto(true)
   return (
     <div className="fixed inset-0 z-[80] flex items-end justify-center bg-tinta/60 p-0 backdrop-blur-sm sm:items-center sm:p-6" onClick={cerrar}>
