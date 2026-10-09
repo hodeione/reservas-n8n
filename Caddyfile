@@ -1,4 +1,19 @@
+# Producción: web del restaurante + API (n8n) en el dominio público y editor de n8n aparte.
 {$DOMINIO} {
+	encode zstd gzip
+	handle /webhook/* {
+		reverse_proxy n8n:5678
+	}
+	handle {
+		root * /srv/web
+		@estaticos path /assets/* /modelos/* /miniaturas/*
+		header @estaticos Cache-Control "public, max-age=604800"
+		try_files {path} /index.html
+		file_server
+	}
+}
+
+{$DOMINIO_EDITOR} {
 	encode zstd gzip
 	reverse_proxy n8n:5678
 }

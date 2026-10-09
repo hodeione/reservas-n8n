@@ -1,0 +1,12 @@
+# Desarrollo: la web en http://localhost:8080 y la API de n8n en /webhook.
+:80 {
+	encode gzip
+	handle /webhook/* {
+		reverse_proxy n8n:5678
+	}
+	handle {
+		root * /srv/web
+		try_files {path} /index.html
+		file_server
+	}
+}

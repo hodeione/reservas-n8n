@@ -1,0 +1,70 @@
+{
+  "config": {
+    "nombre": "Taberna Luna",
+    "eslogan": "Cocina de mercado en el corazón del Casco Viejo",
+    "descripcion": "Producto del día, brasa y pintxos de autor desde 1998. Una casa pequeña, de mantel blanco y trato cercano, donde cada plato sale de lo que encontramos esa mañana en La Ribera.",
+    "direccion": "Calle Somera 12, 48005 Bilbao",
+    "telefono": "944 12 34 56",
+    "email": "hola@tabernaluna.es",
+    "instagram": "tabernaluna",
+    "lat": 43.2566,
+    "lng": -2.9229,
+    "horas": {
+      "comida": ["13:00", "13:30", "14:00", "14:30", "15:00"],
+      "cena": ["20:00", "20:30", "21:00", "21:30", "22:00"]
+    },
+    "duracion": { "comida": 90, "cena": 120 },
+    "cerrado": [1],
+    "vacaciones": [],
+    "franja": 16,
+    "antelacionMin": 60,
+    "diasMax": 60,
+    "maxPersonas": 10,
+    "resena": "",
+    "emailDueno": ""
+  },
+  "mesas": [
+    { "id": "s1", "nombre": "1", "zona": "Salón", "plazas": 2, "min": 1, "x": 70, "y": 80, "w": 80, "h": 80, "forma": "redonda", "activa": true },
+    { "id": "s2", "nombre": "2", "zona": "Salón", "plazas": 2, "min": 1, "x": 200, "y": 80, "w": 80, "h": 80, "forma": "redonda", "activa": true },
+    { "id": "s3", "nombre": "3", "zona": "Salón", "plazas": 4, "min": 2, "x": 330, "y": 70, "w": 110, "h": 100, "forma": "cuadrada", "activa": true },
+    { "id": "s4", "nombre": "4", "zona": "Salón", "plazas": 4, "min": 2, "x": 490, "y": 70, "w": 110, "h": 100, "forma": "cuadrada", "activa": true },
+    { "id": "s5", "nombre": "5", "zona": "Salón", "plazas": 6, "min": 4, "x": 70, "y": 250, "w": 170, "h": 100, "forma": "cuadrada", "activa": true },
+    { "id": "s6", "nombre": "6", "zona": "Salón", "plazas": 4, "min": 2, "x": 300, "y": 250, "w": 110, "h": 100, "forma": "cuadrada", "activa": true },
+    { "id": "s7", "nombre": "7", "zona": "Salón", "plazas": 4, "min": 2, "x": 460, "y": 250, "w": 110, "h": 100, "forma": "redonda", "activa": true },
+    { "id": "s8", "nombre": "8", "zona": "Salón", "plazas": 10, "min": 6, "x": 70, "y": 430, "w": 300, "h": 110, "forma": "cuadrada", "activa": true },
+    { "id": "s9", "nombre": "9", "zona": "Salón", "plazas": 2, "min": 1, "x": 430, "y": 440, "w": 80, "h": 80, "forma": "redonda", "activa": true },
+    { "id": "t1", "nombre": "T1", "zona": "Terraza", "plazas": 2, "min": 1, "x": 720, "y": 90, "w": 80, "h": 80, "forma": "redonda", "activa": true },
+    { "id": "t2", "nombre": "T2", "zona": "Terraza", "plazas": 2, "min": 1, "x": 850, "y": 90, "w": 80, "h": 80, "forma": "redonda", "activa": true },
+    { "id": "t3", "nombre": "T3", "zona": "Terraza", "plazas": 4, "min": 2, "x": 720, "y": 250, "w": 110, "h": 100, "forma": "cuadrada", "activa": true },
+    { "id": "t4", "nombre": "T4", "zona": "Terraza", "plazas": 4, "min": 2, "x": 860, "y": 250, "w": 110, "h": 100, "forma": "cuadrada", "activa": true },
+    { "id": "t5", "nombre": "T5", "zona": "Terraza", "plazas": 6, "min": 4, "x": 740, "y": 430, "w": 200, "h": 100, "forma": "cuadrada", "activa": true }
+  ],
+  "carta": {
+    "categorias": [
+      { "id": "entrantes", "nombre": "Para empezar" },
+      { "id": "principales", "nombre": "Principales" },
+      { "id": "postres", "nombre": "Postres" },
+      { "id": "bebidas", "nombre": "Bebidas" }
+    ],
+    "platos": [
+      { "id": "p1", "categoria": "entrantes", "nombre": "Ensalada de temporada", "descripcion": "Brotes, tomate de Getaria, cebolleta, ventresca y vinagreta de sidra.", "precio": 12.5, "alergenos": ["pescado", "sulfitos"], "etiquetas": ["sin gluten"], "modelo": "salad", "disponible": true, "destacado": false },
+      { "id": "p2", "categoria": "entrantes", "nombre": "Brocheta de verduras a la brasa", "descripcion": "Calabacín, pimiento, cebolla y champiñón con aceite de romero.", "precio": 9.0, "alergenos": [], "etiquetas": ["vegano", "sin gluten"], "modelo": "skewer-vegetables", "disponible": true, "destacado": false },
+      { "id": "p3", "categoria": "entrantes", "nombre": "Sopa de pescado", "descripcion": "Fumet de roca, merluza, almejas y picatostes.", "precio": 11.0, "alergenos": ["pescado", "moluscos", "gluten"], "etiquetas": [], "modelo": "bowl-soup", "disponible": true, "destacado": false },
+      { "id": "p4", "categoria": "entrantes", "nombre": "Patatas Luna", "descripcion": "Patata confitada y crujiente con alioli de ajo negro y salsa brava.", "precio": 7.5, "alergenos": ["huevo"], "etiquetas": ["vegetariano"], "modelo": "fries", "disponible": true, "destacado": true },
+      { "id": "p5", "categoria": "entrantes", "nombre": "Mejillones al vapor", "descripcion": "Con limón, laurel y pimienta negra.", "precio": 10.5, "alergenos": ["moluscos"], "etiquetas": ["sin gluten"], "modelo": "mussel-open", "disponible": true, "destacado": false },
+      { "id": "p6", "categoria": "principales", "nombre": "Hamburguesa Luna", "descripcion": "Vaca vieja madurada 40 días, queso Idiazabal, cebolla caramelizada y pan brioche.", "precio": 16.0, "alergenos": ["gluten", "lacteos", "huevo", "sesamo"], "etiquetas": [], "modelo": "burger-cheese", "disponible": true, "destacado": true },
+      { "id": "p7", "categoria": "principales", "nombre": "Pizza de masa madre", "descripcion": "Tomate San Marzano, mozzarella fior di latte y albahaca fresca.", "precio": 14.0, "alergenos": ["gluten", "lacteos"], "etiquetas": ["vegetariano"], "modelo": "pizza", "disponible": true, "destacado": false },
+      { "id": "p8", "categoria": "principales", "nombre": "Costillas a baja temperatura", "descripcion": "12 horas de cocción y glaseado de miel y pimentón de la Vera.", "precio": 19.5, "alergenos": ["sulfitos"], "etiquetas": ["sin gluten"], "modelo": "meat-ribs", "disponible": true, "destacado": true },
+      { "id": "p9", "categoria": "principales", "nombre": "Pescado del día a la brasa", "descripcion": "Según lonja, con refrito de ajo y guindilla.", "precio": 24.0, "alergenos": ["pescado"], "etiquetas": ["sin gluten"], "modelo": "fish", "disponible": true, "destacado": false },
+      { "id": "p10", "categoria": "principales", "nombre": "Entrecot de vaca", "descripcion": "300 g a la brasa con pimientos de Gernika y patatas.", "precio": 26.0, "alergenos": [], "etiquetas": ["sin gluten"], "modelo": "meat-cooked", "disponible": true, "destacado": false },
+      { "id": "p11", "categoria": "principales", "nombre": "Makis de salmón", "descripcion": "Ocho piezas de salmón noruego, aguacate y sésamo tostado.", "precio": 15.0, "alergenos": ["pescado", "soja", "sesamo"], "etiquetas": [], "modelo": "maki-salmon", "disponible": true, "destacado": false },
+      { "id": "p12", "categoria": "postres", "nombre": "Tarta de queso", "descripcion": "Cremosa, al horno, con frutos rojos.", "precio": 7.0, "alergenos": ["lacteos", "huevo", "gluten"], "etiquetas": ["vegetariano"], "modelo": "cake", "disponible": true, "destacado": true },
+      { "id": "p13", "categoria": "postres", "nombre": "Tortitas con sirope de arce", "descripcion": "Esponjosas, con mantequilla salada.", "precio": 6.5, "alergenos": ["gluten", "lacteos", "huevo"], "etiquetas": ["vegetariano"], "modelo": "pancakes", "disponible": true, "destacado": false },
+      { "id": "p14", "categoria": "postres", "nombre": "Helado artesano", "descripcion": "Dos bolas a elegir: vainilla de Madagascar, chocolate o pistacho.", "precio": 5.5, "alergenos": ["lacteos", "frutos_cascara"], "etiquetas": ["vegetariano", "sin gluten"], "modelo": "ice-cream-cup", "disponible": true, "destacado": false },
+      { "id": "p15", "categoria": "postres", "nombre": "Gofre belga", "descripcion": "Con chocolate caliente y nata.", "precio": 6.0, "alergenos": ["gluten", "lacteos", "huevo"], "etiquetas": ["vegetariano"], "modelo": "waffle", "disponible": false, "destacado": false },
+      { "id": "p16", "categoria": "bebidas", "nombre": "Rioja Alavesa crianza", "descripcion": "Botella. Tempranillo, 14 meses en barrica.", "precio": 22.0, "alergenos": ["sulfitos"], "etiquetas": [], "modelo": "wine-red", "disponible": true, "destacado": false },
+      { "id": "p17", "categoria": "bebidas", "nombre": "Cóctel de la casa", "descripcion": "Ginebra, pacharán, tónica y piel de naranja.", "precio": 9.0, "alergenos": ["sulfitos"], "etiquetas": [], "modelo": "cocktail", "disponible": true, "destacado": false },
+      { "id": "p18", "categoria": "bebidas", "nombre": "Café de especialidad", "descripcion": "Tueste local. Espresso, cortado o con leche.", "precio": 2.2, "alergenos": ["lacteos"], "etiquetas": [], "modelo": "cup-coffee", "disponible": true, "destacado": false }
+    ]
+  }
+}

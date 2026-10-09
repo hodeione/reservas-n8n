@@ -1,6 +1,6 @@
 # Recepcionista de IA por teléfono
 
-El sistema ya expone las tres funciones que necesita un agente de voz: **consultar disponibilidad**, **crear reserva** y **cancelar reserva**. Usa la misma lógica que la web: aforo por turno, ritmo de entradas, duplicados y lista de espera. Las reservas que hace la IA aparecen en el panel con la etiqueta `ia`.
+El sistema ya expone las tres funciones que necesita un agente de voz: **consultar disponibilidad**, **crear reserva** y **cancelar reserva**. Usa la misma lógica que la web: mesas libres durante todo el turno, ritmo de llegadas, duplicados y lista de espera. Las reservas que hace la IA reciben mesa automáticamente y aparecen en el panel como «Recepcionista IA».
 
 Conectarlo a una línea de teléfono real necesita una cuenta en una plataforma de voz y un número. Funciona con cualquiera que admita herramientas HTTP, como ElevenLabs Agents, Vapi, Retell u OpenAI Realtime. El coste habitual es de unos céntimos por minuto.
 

@@ -1,6 +1,6 @@
 # Automatización de reservas para restaurantes con n8n.
-#   Desarrollo:  docker compose --profile dev up -d      (correo de pruebas en http://localhost:8025)
-#   Producción:  docker compose --profile prod up -d     (HTTPS automático con Caddy en $DOMINIO)
+#   Desarrollo:  docker compose --profile dev up -d   web en http://localhost:8088, correo de pruebas en :8025
+#   Producción:  docker compose --profile prod up -d  HTTPS automático con Caddy en $DOMINIO (y el editor en $DOMINIO_EDITOR)
 
 x-n8n-env: &n8n-env
   DB_TYPE: postgresdb
@@ -13,7 +13,7 @@ x-n8n-env: &n8n-env
   TZ: Europe/Madrid
   N8N_HOST: ${DOMINIO:-localhost}
   WEBHOOK_URL: ${URL_PUBLICA}/
-  N8N_EDITOR_BASE_URL: ${URL_PUBLICA}/
+  N8N_EDITOR_BASE_URL: ${URL_EDITOR}/
   N8N_SECURE_COOKIE: ${N8N_SECURE_COOKIE:-true}
   N8N_DIAGNOSTICS_ENABLED: "false"
   N8N_PERSONALIZATION_ENABLED: "false"
@@ -25,15 +25,6 @@ x-n8n-env: &n8n-env
   REST_EMAIL_REMITENTE: ${REST_EMAIL_REMITENTE}
   REST_TELEFONO: ${REST_TELEFONO}
   REST_DIRECCION: ${REST_DIRECCION}
-  REST_AFORO_COMIDA: ${REST_AFORO_COMIDA:-40}
-  REST_AFORO_CENA: ${REST_AFORO_CENA:-40}
-  REST_ENTRADAS_FRANJA: ${REST_ENTRADAS_FRANJA:-16}
-  REST_ANTELACION_MIN: ${REST_ANTELACION_MIN:-60}
-  REST_DIAS_MAX: ${REST_DIAS_MAX:-60}
-  REST_HORAS_COMIDA: ${REST_HORAS_COMIDA:-13:00,13:30,14:00,14:30,15:00}
-  REST_HORAS_CENA: ${REST_HORAS_CENA:-20:00,20:30,21:00,21:30,22:00}
-  REST_DIAS_CERRADO: ${REST_DIAS_CERRADO:-1}
-  REST_MAX_PERSONAS: ${REST_MAX_PERSONAS:-10}
   REST_URL_RESENA: ${REST_URL_RESENA}
   REST_CLAVE_PANEL: ${REST_CLAVE_PANEL}
   REST_CLAVE_AGENTE: ${REST_CLAVE_AGENTE}
@@ -77,6 +68,19 @@ services:
     ports:
       - "8025:8025"
 
+  # Solo en desarrollo: sirve la web compilada (web/dist) y pasa /webhook a n8n
+  web:
+    image: caddy:2-alpine
+    profiles: ["dev"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${PUERTO_WEB:-8088}:80"
+    volumes:
+      - ./Caddyfile.dev:/etc/caddy/Caddyfile:ro
+      - ./web/dist:/srv/web:ro
+    depends_on:
+      - n8n
+
   # Solo en producción: HTTPS automático con Let's Encrypt
   caddy:
     image: caddy:2-alpine
@@ -87,8 +91,10 @@ services:
       - "443:443"
     environment:
       DOMINIO: ${DOMINIO}
+      DOMINIO_EDITOR: ${DOMINIO_EDITOR}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./web/dist:/srv/web:ro
       - caddy_data:/data
     depends_on:
       - n8n

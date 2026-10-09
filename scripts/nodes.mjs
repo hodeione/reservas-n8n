@@ -207,3 +207,28 @@ export const respondExpr = (name, bodyExpr, statusExpr = '200') => ({
     options: { responseCode: `={{ ${statusExpr} }}`, responseHeaders: { entries: [{ name: 'cache-control', value: 'no-store' }] } },
   },
 })
+
+/** Inserta o actualiza (según `conditions`) con los campos del item de entrada. */
+export const dtUpsert = (name, key, conditions) => ({
+  name,
+  type: 'n8n-nodes-base.dataTable',
+  typeVersion: 1,
+  parameters: {
+    resource: 'row',
+    operation: 'upsert',
+    dataTableId: table(key),
+    matchType: 'allConditions',
+    filters: conds(conditions),
+    columns: { mappingMode: 'autoMapInputData', value: {}, matchingColumns: [], schema: [], attemptToConvertTypes: false, convertFieldsToString: false },
+    options: {},
+  },
+})
+
+/** Lee toda la tabla «contenido» (configuración, mesas y carta). */
+export const contenido = (name) => ({
+  name,
+  type: 'n8n-nodes-base.dataTable',
+  typeVersion: 1,
+  alwaysOutputData: true,
+  parameters: { resource: 'row', operation: 'get', dataTableId: table('CONTENIDO'), matchType: 'allConditions', filters: { conditions: [] }, returnAll: true },
+})
