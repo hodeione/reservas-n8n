@@ -57,10 +57,13 @@ export function Modelo3D({ modelo, nombre, ar = false, giro = true, controles = 
       {...(ar ? { ar: '', 'ar-modes': 'webxr scene-viewer quick-look', 'ar-scale': 'fixed', 'ar-placement': 'floor' } : {})}
       shadow-intensity="1.1"
       shadow-softness="0.8"
-      exposure="1.05"
+      exposure="1"
+      tone-mapping="neutral"
       environment-image="neutral"
       camera-orbit={orbita}
-      field-of-view="28deg"
+      field-of-view="22deg"
+      min-camera-orbit="auto 0deg 40%"
+      max-camera-orbit="auto 88deg auto"
       interaction-prompt="none"
       touch-action="pan-y"
       class={className}

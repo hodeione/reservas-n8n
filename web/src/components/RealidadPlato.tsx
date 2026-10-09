@@ -72,7 +72,8 @@ class Motor {
     this.renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true, preserveDrawingBuffer: true })
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2))
     this.renderer.outputColorSpace = THREE.SRGBColorSpace
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping
+    // Mapeo neutro: respeta el color fotografiado de los escaneos.
+    this.renderer.toneMapping = THREE.NeutralToneMapping
     this.renderer.shadowMap.enabled = true
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap
     const pm = new THREE.PMREMGenerator(this.renderer)
@@ -113,7 +114,7 @@ class Motor {
     let media = 0
     for (let i = 0; i < g.length; i += 16) media += g[i]
     media /= g.length / 16
-    this.renderer.toneMappingExposure = THREE.MathUtils.clamp(0.55 + media / 190, 0.7, 1.5)
+    this.renderer.toneMappingExposure = THREE.MathUtils.clamp(0.45 + media / 230, 0.65, 1.25)
     this.G = gradiente(g, this.sw, this.sh)
   }
 

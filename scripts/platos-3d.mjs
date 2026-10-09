@@ -8,7 +8,7 @@
 // plato de cerámica generado aquí, y además se guarda la versión sin plato para ponerla encima de
 // un plato real con la cámara.
 import { NodeIO } from '@gltf-transform/core'
-import { ALL_EXTENSIONS, EXTMeshoptCompression } from '@gltf-transform/extensions'
+import { ALL_EXTENSIONS, EXTMeshoptCompression, KHRMaterialsUnlit } from '@gltf-transform/extensions'
 import { dedup, flatten, getBounds, join, meshopt, prune, simplify, textureCompress, weld } from '@gltf-transform/functions'
 import { MeshoptDecoder, MeshoptEncoder, MeshoptSimplifier } from 'meshoptimizer'
 import sharp from 'sharp'
@@ -118,13 +118,27 @@ function normalizar(doc, diametro, giro) {
   return { escena, envoltura, alto: (b.max[1] - b.min[1]) * s }
 }
 
-async function optimizar(doc, maxTri = 70000) {
+/**
+ * Los escaneos fotogramétricos ya llevan la luz real en la textura: se muestran sin iluminación
+ * artificial (KHR_materials_unlit), como en Sketchfab, para que el color sea el de la foto y no
+ * parezcan de plástico.
+ */
+function sinLuz(doc) {
+  const unlit = doc.createExtension(KHRMaterialsUnlit)
+  for (const m of doc.getRoot().listMaterials()) {
+    m.setExtension('KHR_materials_unlit', unlit.createUnlit())
+    m.setMetallicFactor(0).setRoughnessFactor(1)
+  }
+}
+
+async function optimizar(doc, maxTri = 150000) {
+  sinLuz(doc)
   await doc.transform(dedup(), flatten(), join(), weld())
   let tri = 0
   for (const m of doc.getRoot().listMeshes()) for (const p of m.listPrimitives()) tri += (p.getIndices()?.getCount() ?? p.getAttribute('POSITION').getCount()) / 3
   if (tri > maxTri) await doc.transform(simplify({ simplifier: MeshoptSimplifier, ratio: maxTri / tri, error: 0.002, lockBorder: false }))
   await doc.transform(
-    textureCompress({ encoder: sharp, targetFormat: 'webp', resize: [1536, 1536], quality: 82 }),
+    textureCompress({ encoder: sharp, targetFormat: 'webp', quality: 95 }),
     prune(),
     meshopt({ encoder: MeshoptEncoder, level: 'medium' }),
   )
