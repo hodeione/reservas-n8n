@@ -1,5 +1,5 @@
 // Prepara los modelos 3D reales de la carta (escaneos fotogramétricos CC-BY de Objaverse/Sketchfab).
-//   node scripts/platos-3d.mjs <carpeta-con-los-glb-originales> [carpeta-de-salida]
+//   node scripts/platos-3d.mjs <carpeta-con-los-glb-originales> [carpeta-de-salida] [texturas-ampliadas]
 // Necesita: npm i @gltf-transform/core @gltf-transform/extensions @gltf-transform/functions meshoptimizer sharp
 //
 // Para cada plato: centra el modelo, apoya su base en y=0, lo escala a su tamaño real en metros
@@ -12,10 +12,12 @@ import { ALL_EXTENSIONS, EXTMeshoptCompression, KHRMaterialsUnlit } from '@gltf-
 import { dedup, flatten, getBounds, join, meshopt, prune, simplify, textureCompress, weld } from '@gltf-transform/functions'
 import { MeshoptDecoder, MeshoptEncoder, MeshoptSimplifier } from 'meshoptimizer'
 import sharp from 'sharp'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join as ruta } from 'node:path'
 
 const ORIGEN = process.argv[2]
+// Opcional: carpeta con las texturas ampliadas con IA (Real-ESRGAN ×4), «<archivo>__<n>.png».
+const AMPLIADAS = process.argv[4] || ''
 const DESTINO = process.argv[3] || new URL('../web/public/platos/', import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1')
 mkdirSync(DESTINO, { recursive: true })
 
@@ -138,7 +140,7 @@ async function optimizar(doc, maxTri = 150000) {
   for (const m of doc.getRoot().listMeshes()) for (const p of m.listPrimitives()) tri += (p.getIndices()?.getCount() ?? p.getAttribute('POSITION').getCount()) / 3
   if (tri > maxTri) await doc.transform(simplify({ simplifier: MeshoptSimplifier, ratio: maxTri / tri, error: 0.002, lockBorder: false }))
   await doc.transform(
-    textureCompress({ encoder: sharp, targetFormat: 'webp', quality: 95 }),
+    textureCompress({ encoder: sharp, targetFormat: 'webp', resize: [2048, 2048], quality: 90 }),
     prune(),
     meshopt({ encoder: MeshoptEncoder, level: 'medium' }),
   )
@@ -148,6 +150,12 @@ async function optimizar(doc, maxTri = 150000) {
 const resumen = []
 for (const [id, [archivo, diam, plato, giro]] of Object.entries(PLATOS)) {
   const doc = await io.read(ruta(ORIGEN, archivo + '.glb'))
+  if (AMPLIADAS) {
+    doc.getRoot().listTextures().forEach((t, i) => {
+      const f = ruta(AMPLIADAS, `${archivo}__${i}.png`)
+      if (existsSync(f)) t.setImage(new Uint8Array(readFileSync(f))).setMimeType('image/png')
+    })
+  }
   doc.createExtension(EXTMeshoptCompression).setRequired(true).setEncoderOptions({ method: EXTMeshoptCompression.EncoderMethod.QUANTIZE })
   const { alto } = normalizar(doc, diam, giro)
   const tri = await optimizar(doc)
