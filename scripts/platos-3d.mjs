@@ -21,7 +21,9 @@ const AMPLIADAS = process.argv[4] || ''
 const DESTINO = process.argv[3] || new URL('../web/public/platos/', import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1')
 mkdirSync(DESTINO, { recursive: true })
 
-// id: [archivo original, diámetro real del conjunto en metros, plato añadido (diámetro) o 0, giro en grados]
+// id: [archivo original, diámetro real del conjunto en metros, plato añadido (diámetro) o 0, giro en grados,
+//      recorte de la base en metros: quita lo escaneado por debajo (la tabla o el mantel donde se fotografió),
+//      { madera: altura, fuera: radio }: además quita, fuera de ese radio, lo que, por debajo de esa altura, tiene color de tabla de madera]
 const PLATOS = {
   'tabla-ibericos': ['tabla', 0.4, 0, 0],
   ostras: ['ostras', 0.3, 0, 0],
@@ -30,11 +32,11 @@ const PLATOS = {
   ensalada: ['ensalada', 0.26, 0, 0],
   'melon-jamon': ['antipasti', 0.29, 0, 0],
   pulpo: ['pulpo2', 0.29, 0, 0],
-  'arroz-negro': ['paella2', 0.42, 0, 0],
+  'arroz-negro': ['paella2', 0.42, 0, 0, 0.012, { madera: 0.045, fuera: 0.135 }],
   chuleton: ['chuleton', 0.32, 0, 0],
   lubina: ['lubina', 0.34, 0, 0],
   salmon: ['salmon', 0.28, 0, 0],
-  cordero: ['cordero', 0.36, 0, 0],
+  cordero: ['cordero', 0.36, 0, 0, 0.011],
   tartar: ['tartar', 0.3, 0, 0],
   'tarta-queso': ['tarta-queso', 0.24, 0.33, 0],
   'tarta-chocolate': ['coulant', 0.25, 0, 0],
@@ -133,9 +135,97 @@ function sinLuz(doc) {
   }
 }
 
-async function optimizar(doc, maxTri = 150000) {
+
+/**
+ * Quita los triángulos que quedan enteros por debajo de «umbral» (en metros, ya a escala real):
+ * la tabla o el mantel sobre el que se escaneó el plato. Después vuelve a apoyar el plato en y=0.
+ * Se llama tras flatten(), así que cada malla cuelga de la escena y su matriz local es la del mundo.
+ */
+function recortarBase(doc, umbral) {
+  let minY = Infinity
+  for (const n of doc.getRoot().listNodes()) {
+    const m = n.getMesh()
+    if (!m) continue
+    const W = n.getWorldMatrix()
+    const y = (v) => W[1] * v[0] + W[5] * v[1] + W[9] * v[2] + W[13]
+    for (const p of m.listPrimitives()) {
+      const pos = p.getAttribute('POSITION')
+      const idx = p.getIndices()
+      if (!idx) continue
+      const v = [0, 0, 0]
+      const alto = new Float32Array(pos.getCount())
+      for (let i = 0; i < pos.getCount(); i++) alto[i] = y(pos.getElement(i, v))
+      const viejos = idx.getArray()
+      const nuevos = []
+      for (let t = 0; t < viejos.length; t += 3) {
+        const a = viejos[t], b = viejos[t + 1], c = viejos[t + 2]
+        if (Math.max(alto[a], alto[b], alto[c]) < umbral) continue
+        nuevos.push(a, b, c)
+        minY = Math.min(minY, alto[a], alto[b], alto[c])
+      }
+      idx.setArray(new Uint32Array(nuevos))
+    }
+  }
+  if (Number.isFinite(minY) && minY > 0) {
+    for (const n of doc.getRoot().getDefaultScene().listChildren()) {
+      const [x, yy, z] = n.getTranslation()
+      n.setTranslation([x, yy - minY, z])
+    }
+  }
+}
+
+/** Quita los triángulos bajos cuyo color en la textura es de tabla de madera (naranja claro). */
+async function recortarMadera(doc, alturaMax, radioMin = 0) {
+  for (const n of doc.getRoot().listNodes()) {
+    const m = n.getMesh()
+    if (!m) continue
+    const W = n.getWorldMatrix()
+    for (const p of m.listPrimitives()) {
+      const tex = p.getMaterial()?.getBaseColorTexture()
+      const uv = p.getAttribute('TEXCOORD_0')
+      const idx = p.getIndices()
+      if (!tex || !uv || !idx) continue
+      const { data, info } = await sharp(Buffer.from(tex.getImage())).removeAlpha().raw().toBuffer({ resolveWithObject: true })
+      const pos = p.getAttribute('POSITION')
+      const v = [0, 0, 0]
+      const t = [0, 0]
+      const alto = new Float32Array(pos.getCount())
+      const radio = new Float32Array(pos.getCount())
+      for (let i = 0; i < pos.getCount(); i++) {
+        pos.getElement(i, v)
+        alto[i] = W[1] * v[0] + W[5] * v[1] + W[9] * v[2] + W[13]
+        radio[i] = Math.hypot(W[0] * v[0] + W[4] * v[1] + W[8] * v[2] + W[12], W[2] * v[0] + W[6] * v[1] + W[10] * v[2] + W[14])
+      }
+      const color = (i) => {
+        uv.getElement(i, t)
+        const x = Math.min(info.width - 1, Math.max(0, Math.round((t[0] - Math.floor(t[0])) * (info.width - 1))))
+        const y = Math.min(info.height - 1, Math.max(0, Math.round((t[1] - Math.floor(t[1])) * (info.height - 1))))
+        const k = (y * info.width + x) * 3
+        return [data[k], data[k + 1], data[k + 2]]
+      }
+      const esMadera = ([r, g, b]) => r > 60 && r > g * 1.12 && g >= b && r - b > 30
+      const viejos = idx.getArray()
+      const nuevos = []
+      for (let i = 0; i < viejos.length; i += 3) {
+        const tri = [viejos[i], viejos[i + 1], viejos[i + 2]]
+        // Solo fuera del recipiente (la comida de dentro puede tener el mismo color).
+        const bajo = Math.max(...tri.map((j) => alto[j])) < alturaMax && Math.min(...tri.map((j) => radio[j])) > radioMin
+        if (bajo && tri.filter((j) => esMadera(color(j))).length >= 2) continue
+        nuevos.push(...tri)
+      }
+      idx.setArray(new Uint32Array(nuevos))
+    }
+  }
+}
+
+async function optimizar(doc, maxTri = 150000, recorte = 0, extra = {}) {
   sinLuz(doc)
   await doc.transform(dedup(), flatten(), join(), weld())
+  if (extra.madera) await recortarMadera(doc, extra.madera, extra.fuera)
+  if (recorte) {
+    recortarBase(doc, recorte)
+    await doc.transform(prune())
+  }
   let tri = 0
   for (const m of doc.getRoot().listMeshes()) for (const p of m.listPrimitives()) tri += (p.getIndices()?.getCount() ?? p.getAttribute('POSITION').getCount()) / 3
   if (tri > maxTri) await doc.transform(simplify({ simplifier: MeshoptSimplifier, ratio: maxTri / tri, error: 0.002, lockBorder: false }))
@@ -148,7 +238,7 @@ async function optimizar(doc, maxTri = 150000) {
 }
 
 const resumen = []
-for (const [id, [archivo, diam, plato, giro]] of Object.entries(PLATOS)) {
+for (const [id, [archivo, diam, plato, giro, recorte = 0, extra = {}]] of Object.entries(PLATOS)) {
   const doc = await io.read(ruta(ORIGEN, archivo + '.glb'))
   if (AMPLIADAS) {
     doc.getRoot().listTextures().forEach((t, i) => {
@@ -158,7 +248,7 @@ for (const [id, [archivo, diam, plato, giro]] of Object.entries(PLATOS)) {
   }
   doc.createExtension(EXTMeshoptCompression).setRequired(true).setEncoderOptions({ method: EXTMeshoptCompression.EncoderMethod.QUANTIZE })
   const { alto } = normalizar(doc, diam, giro)
-  const tri = await optimizar(doc)
+  const tri = await optimizar(doc, 150000, recorte, extra)
   let bytesSolo = 0
   if (plato) {
     // Versión sin plato, para colocarla sobre un plato real con la cámara.
