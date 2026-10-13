@@ -135,4 +135,4 @@ Ver [docs/produccion.md](docs/produccion.md): un VPS de 5–8 € al mes con Doc
 
 ---
 
-Hecho por [Hodei Medina](https://github.com/hodeione) · [DH Technology](https://h-com-bay.vercel.app) · MIT. Modelos 3D de sus autores bajo CC BY (ver créditos).
+Hecho por [Hodei Medina](https://github.com/hodeione) · [DH Technology](https://h-com-bay.vercel.app) · MIT. Modelos 3D de sus autores bajo CC BY (ver créditos). Mesa de roble e iluminación de cafetería de [Poly Haven](https://polyhaven.com) (CC0).

@@ -1,8 +1,11 @@
-import { useEffect, useRef, type ReactNode } from 'react'
+import { Suspense, lazy, useEffect, useRef, type ReactNode } from 'react'
 import type { Plato, Restaurante } from '../lib/api'
 import { ALERGENOS, DIAS, alClicar, euros, useRuta } from '../lib/util'
 import { Modelo3D } from './Modelo3D'
 import { credito, esReal, urlMiniatura } from '../lib/modelos'
+
+// Visor de foto (mesa, luz real, desenfoque): solo se descarga al abrir un plato.
+const VisorRealista = lazy(() => import('./VisorRealista').then((m) => ({ default: m.VisorRealista })))
 
 export function Cabecera({ r }: { r: Restaurante }) {
   const ruta = useRuta()
@@ -121,14 +124,22 @@ export function FichaPlato({ p, onCerrar, onServir }: { p: Plato; onCerrar: () =
         aria-modal="true"
         aria-label={p.nombre}
         onClick={(e) => e.stopPropagation()}
-        className="relative flex max-h-[94vh] w-full max-w-3xl flex-col overflow-hidden rounded-t-3xl bg-papel shadow-2xl outline-none sm:rounded-3xl md:flex-row"
+        className="relative flex max-h-[94vh] w-full max-w-4xl flex-col overflow-hidden rounded-t-3xl bg-papel shadow-2xl outline-none sm:rounded-3xl md:flex-row"
       >
         <button onClick={onCerrar} aria-label="Cerrar" className="absolute right-3 top-3 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-white/90 text-xl shadow">×</button>
-        <div className="relative h-[46vh] shrink-0 bg-[radial-gradient(circle_at_50%_40%,#fff,#efe6d8)] md:h-auto md:w-1/2">
-          {p.modelo ? <Modelo3D modelo={p.modelo} nombre={p.nombre} ar className="h-full w-full" /> : <Imagen p={p} className="h-full w-full p-8" />}
-          {p.modelo && <p className="pointer-events-none absolute left-0 right-0 top-3 text-center text-xs text-gris">{esReal(p.modelo) ? 'Escaneo 3D del plato · gíralo con el dedo' : 'Gíralo con el dedo'}</p>}
+        <div className="relative h-[52vh] shrink-0 bg-[radial-gradient(circle_at_50%_40%,#fff,#efe6d8)] md:h-auto md:min-h-[560px] md:w-[58%]">
+          {p.modelo && esReal(p.modelo) ? (
+            <Suspense fallback={<Imagen p={p} className="h-full w-full p-8" />}>
+              <VisorRealista modelo={p.modelo} nombre={p.nombre} className="h-full w-full" />
+            </Suspense>
+          ) : p.modelo ? (
+            <Modelo3D modelo={p.modelo} nombre={p.nombre} ar className="h-full w-full" />
+          ) : (
+            <Imagen p={p} className="h-full w-full p-8" />
+          )}
+          {p.modelo && <p className="pointer-events-none absolute left-0 right-0 top-3 z-10 text-center text-xs font-semibold text-white drop-shadow-[0_1px_2px_rgba(0,0,0,.6)]">{esReal(p.modelo) ? 'Escaneo 3D real · gíralo y acércate' : 'Gíralo con el dedo'}</p>}
         </div>
-        <div className="overflow-y-auto p-6 md:w-1/2">
+        <div className="overflow-y-auto p-6 md:w-[42%]">
           <h2 className="font-serif text-3xl leading-tight">{p.nombre}</h2>
           <p className="mt-1 text-2xl font-semibold text-teja">{euros(p.precio)}</p>
           {p.etiquetas.length > 0 && (
