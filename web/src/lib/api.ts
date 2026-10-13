@@ -21,6 +21,8 @@ export interface Restaurante {
   resena?: string
   emailDueno?: string
   emailCocina?: string
+  /** Minutos de espera en la cola a partir de los que se avisa al encargado (0 = nunca). */
+  colaUmbral?: number
   /** % de probabilidad de lluvia a partir del cual se recoge la terraza (0 = nunca). */
   lluviaUmbral?: number
   /** Días sin venir para invitar a volver a un cliente habitual (0 = nunca). */
@@ -108,6 +110,21 @@ export interface DatosAdmin {
   clientes?: Record<string, { visitas: number; noShows: number; ultima: string }>
 }
 
+/** Aforo en vivo que publica la cámara del local. */
+export interface EstadoAforo {
+  ok: true
+  hay: boolean
+  ocupacion?: number
+  capacidad?: number
+  porcentaje?: number
+  cola?: number
+  /** Segundos de espera estimada en la cola. */
+  espera?: number
+  /** Segundos desde la última lectura. */
+  hace?: number
+  nivel?: 'tranquilo' | 'animado' | 'casi lleno' | 'lleno'
+}
+
 export interface EmailDemo {
   id: string
   para: string
@@ -172,7 +189,7 @@ async function pedir<T>(path: string, init?: RequestInit & { clave?: string }): 
   return data as T
 }
 
-const TAREAS: Record<string, string> = { '03': 'tareas/recordatorios', '04': 'tareas/resenas', '05': 'interno/espera', '07': 'tareas/informe', '08': 'tareas/terraza', '09': 'tareas/cocina', '10': 'tareas/recuperar' }
+const TAREAS: Record<string, string> = { '03': 'tareas/recordatorios', '04': 'tareas/resenas', '05': 'interno/espera', '07': 'tareas/informe', '08': 'tareas/terraza', '09': 'tareas/cocina', '10': 'tareas/recuperar', '11': 'api/aforo' }
 
 export const api = {
   web: () => pedir<DatosWeb>('/api/web'),
@@ -197,6 +214,11 @@ export const api = {
       DEMO
         ? pedir<{ ok: true; registro: RegistroDemo }>('/api/demo/ejecutar', { method: 'POST', body: JSON.stringify({ flujo, ...extra }), clave })
         : pedir<{ message?: string }>('/' + TAREAS[flujo], { method: 'POST', body: JSON.stringify({ clave, ...extra }) }),
+  },
+  aforo: {
+    estado: () => pedir<EstadoAforo>('/api/aforo'),
+    enviar: (clave: string, lectura: { ocupacion: number; capacidad: number; cola: number; espera: number }) =>
+      pedir<{ ok: true; alerta: boolean }>('/api/aforo', { method: 'POST', body: JSON.stringify(lectura), clave }),
   },
   demo: {
     bandeja: () => pedir<{ emails: EmailDemo[]; registro: RegistroDemo[] }>('/api/demo/bandeja'),

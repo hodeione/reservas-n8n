@@ -23,7 +23,7 @@ const EXPORTA = [
   'cargar', 'hoy', 'minutos', 'turnoDe', 'fechaLarga', 'mesasActivas', 'nombreMesa', 'estadoMesas', 'mejorMesa', 'diaCerrado', 'disponibilidad', 'alternativas',
   'validarReserva', 'nuevoToken', 'nuevoCodigo', 'enlace', 'emailHtml', 'datosReserva', 'validarConfig', 'validarMesas', 'validarCarta', 'esFecha',
   'lluviaPorTurno', 'moverTerraza', 'emailCambioTerraza', 'historialClientes', 'hojaCocina', 'clientesARecuperar', 'emailRecuperar', 'confirmacionReserva',
-  'avisoListaEspera', 'asignarListaEspera', 'avisoMesaLiberada', 'recordatorio', 'peticionResena', 'informeDiario', 'asignarReserva', 'OCUPAN', 'MODELOS_3D', 'ALERGENOS', 'ETIQUETAS',
+  'avisoListaEspera', 'asignarListaEspera', 'avisoMesaLiberada', 'recordatorio', 'peticionResena', 'informeDiario', 'asignarReserva', 'validarLectura', 'aforoPublico', 'alertaCola', 'emailAlertaCola', 'OCUPAN', 'MODELOS_3D', 'ALERGENOS', 'ETIQUETAS',
 ]
 
 function crearLib() {
@@ -90,6 +90,7 @@ interface Estado {
   emails: Email[]
   registro: Registro[]
   avisados: Record<string, string>
+  aforo?: Fila
   sec: number
 }
 
@@ -157,7 +158,7 @@ function sembrar(): Estado {
   const r = azar(Number(hoyIso.replace(/-/g, '')))
   const elegir = <T,>(l: T[]) => l[Math.floor(r() * l.length)]
   const contenido = structuredClone({
-    config: { ...demo.config, emailDueno: 'dueno@tabernaluna.es', emailCocina: 'cocina@tabernaluna.es', resena: 'https://g.page/r/taberna-luna/review', lluviaUmbral: 60, recuperarDias: 60 },
+    config: { ...demo.config, emailDueno: 'dueno@tabernaluna.es', emailCocina: 'cocina@tabernaluna.es', resena: 'https://g.page/r/taberna-luna/review', lluviaUmbral: 60, recuperarDias: 60, colaUmbral: 10 },
     mesas: demo.mesas,
     carta: demo.carta,
   }) as Estado['contenido']
@@ -313,8 +314,28 @@ async function ejecutar(e: Estado, flujo: string, b: Fila) {
     const n = enviar(e, '10', lista.map((c) => ({ para: c.email, asunto: 'Te echamos de menos en ' + L.CFG.nombre, html: L.emailRecuperar(c) })))
     lista.forEach((c) => (e.avisados[c.telefono] = hoyIso))
     anotar(e, '10', lista.length ? `${lista.length} clientes habituales invitados a volver: ${lista.map((c) => c.nombre).join(', ')}` : 'Ningún cliente habitual pendiente de invitar', n, true)
+  } else if (flujo === '11') {
+    registrarAforo(e, { ocupacion: b.ocupacion ?? 13, capacidad: b.capacidad ?? 14, cola: b.cola ?? 9, espera: b.espera ?? 900 }, true)
   } else throw new ErrorDemo(400, { ok: false, error: 'Flujo desconocido.' })
 }
+
+/** Lectura de la cámara: se guarda y, si la cola pasa del umbral, se avisa al encargado (flujo 11). */
+function registrarAforo(e: Estado, b: Fila, manual = false) {
+  const l = L.validarLectura(b)
+  const ahora = ahora_ms()
+  const previa = e.aforo || {}
+  const alerta = L.alertaCola(l, previa.ultimaAlerta, ahora)
+  const ts = new Date(ahora).toISOString()
+  e.aforo = { ...l, ts, ultimaAlerta: alerta ? ts : previa.ultimaAlerta || '' }
+  if (alerta) {
+    const n = enviar(e, '11', [{ para: L.CFG.emailDueno, ...L.emailAlertaCola(l) }])
+    anotar(e, '11', `Cola de ${l.cola} personas con ${Math.round(l.espera / 60)} min de espera: aviso al encargado`, n, manual)
+  } else if (manual) {
+    anotar(e, '11', `Lectura de la cámara: ${l.ocupacion} de ${l.capacidad}, cola de ${l.cola}${L.CFG.colaUmbral ? '' : ' (avisos desactivados)'}`, 0, true)
+  }
+  return alerta
+}
+const ahora_ms = () => Date.now()
 
 /* ----------------------------------------------------------- rutas */
 
@@ -449,6 +470,20 @@ export async function atender(ruta: string, init?: RequestInit & { clave?: strin
     if (b.estado === 'cancelada' || b.estado === 'no_show') listaEspera(e)
     guardar(e)
     return { ok: true }
+  }
+  if (p === '/api/aforo' && metodo === 'GET') {
+    return L.aforoPublico(e.aforo, ahora_ms())
+  }
+  if (p === '/api/aforo' && metodo === 'POST') {
+    exigirAdmin()
+    let alerta = false
+    try {
+      alerta = registrarAforo(e, b)
+    } catch (err) {
+      no(400, { ok: false, error: (err as Error).message })
+    }
+    guardar(e)
+    return { ok: true, alerta }
   }
   if (p === '/api/demo/bandeja') {
     return { emails: e.emails, registro: e.registro }

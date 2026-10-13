@@ -1,4 +1,5 @@
 import { Suspense, lazy, useState } from 'react'
+import { AforoPublico } from '../components/AforoEnVivo'
 import { FichaPlato, Imagen, Seccion, horario } from '../components/Sitio'
 import { Modelo3D } from '../components/Modelo3D'
 import type { DatosWeb, Plato } from '../lib/api'
@@ -34,6 +35,7 @@ export function Inicio({ d }: { d: DatosWeb }) {
                 Ver la carta en 3D
               </a>
             </div>
+            <AforoPublico />
             <p className="mt-6 text-sm text-gris">
               {h.dias} · {[h.comida && `comida ${h.comida}`, h.cena && `cena ${h.cena}`].filter(Boolean).join(' · ')}
             </p>

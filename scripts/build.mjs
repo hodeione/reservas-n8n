@@ -550,6 +550,61 @@ return $('Elegir clientes').all().map((i) => ({ json: { telefono: i.json.telefon
   flows.push(f)
 }
 
+/* ===================================================== 11 · Aforo en vivo */
+{
+  const f = new Flow('11 · Aforo en vivo y aviso de cola')
+  // La cámara del local (página /aforo) envía cifras cada 15 s: nunca imágenes.
+  f.add(webhook('POST /api/aforo', 'POST', 'api/aforo'), [0, 0])
+  f.add(contenido('Contenido (lectura)'), [240, 0])
+  f.add(code('Validar lectura', `
+const docs = cargar('Contenido (lectura)')
+const req = $('POST /api/aforo').first().json
+if (!esAdmin(req)) return respuesta(401, { ok: false, error: 'Clave incorrecta.' })
+let l
+try {
+  l = validarLectura(req.body)
+} catch (e) {
+  return respuesta(400, { ok: false, error: e.message })
+}
+const ahora = $now.toMillis()
+const previa = docs.aforo || {}
+const alerta = alertaCola(l, previa.ultimaAlerta, ahora)
+const aviso = alerta ? { para: CFG.emailDueno || $env.REST_EMAIL_DUENO, ...emailAlertaCola(l) } : null
+const ts = new Date(ahora).toISOString()
+return [{ json: { alerta: !!(alerta && aviso.para), aviso, valor: JSON.stringify({ ...l, ts, ultimaAlerta: alerta ? ts : previa.ultimaAlerta || '' }) } }]
+`), [480, 0])
+  f.add(ifExpr('¿Lectura válida?', '$json.body === undefined'), [720, 0])
+  f.add(code('Preparar guardado', `
+return [{ json: { clave: 'aforo', valor: $('Validar lectura').first().json.valor } }]
+`), [960, -60])
+  f.add(dtUpsert('Guardar lectura', 'CONTENIDO', [['clave', 'eq', 'aforo']]), [1200, -60])
+  f.add(ifExpr('¿Avisar al encargado?', '$("Validar lectura").first().json.alerta'), [1440, -60])
+  f.add(code('Preparar aviso de cola', `
+return [{ json: $('Validar lectura').first().json.aviso }]
+`), [1680, -120])
+  f.add(email('Avisar de la cola'), [1920, -120])
+  f.add(respondExpr('Responder lectura', '({ ok: true, alerta: $("Validar lectura").first().json.alerta })'), [2160, -60])
+  f.add(respondJson('Responder lectura no válida'), [960, 120])
+  f.chain('POST /api/aforo', 'Contenido (lectura)', 'Validar lectura', '¿Lectura válida?')
+  f.connect('¿Lectura válida?', 'Preparar guardado', 0)
+  f.connect('¿Lectura válida?', 'Responder lectura no válida', 1)
+  f.chain('Preparar guardado', 'Guardar lectura', '¿Avisar al encargado?')
+  f.connect('¿Avisar al encargado?', 'Preparar aviso de cola', 0)
+  f.connect('¿Avisar al encargado?', 'Responder lectura', 1)
+  f.chain('Preparar aviso de cola', 'Avisar de la cola', 'Responder lectura')
+
+  // Lo que ve la web pública: porcentaje, cola y espera (solo si la lectura es reciente).
+  f.add(webhook('GET /api/aforo', 'GET', 'api/aforo'), [0, 360])
+  f.add(contenido('Contenido (aforo)'), [240, 360])
+  f.add(code('Aforo público', `
+const docs = cargar('Contenido (aforo)')
+return respuesta(200, aforoPublico(docs.aforo, $now.toMillis()))
+`), [480, 360])
+  f.add(respondJson('Responder aforo'), [720, 360])
+  f.chain('GET /api/aforo', 'Contenido (aforo)', 'Aforo público', 'Responder aforo')
+  flows.push(f)
+}
+
 const out = new URL('../workflows/', import.meta.url)
 rmSync(out, { recursive: true, force: true })
 mkdirSync(out, { recursive: true })

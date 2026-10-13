@@ -31,6 +31,7 @@ const POR_DEFECTO = {
   emailCocina: '',
   lluviaUmbral: 60,
   recuperarDias: 60,
+  colaUmbral: 10,
 }
 
 let CFG = { ...POR_DEFECTO }
@@ -300,6 +301,7 @@ function validarConfig(v) {
     emailCocina: /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(v.emailCocina || '')) ? String(v.emailCocina).trim() : '',
     lluviaUmbral: entero(v.lluviaUmbral, 0, 100, 60),
     recuperarDias: entero(v.recuperarDias, 0, 365, 60),
+    colaUmbral: entero(v.colaUmbral, 0, 120, 10),
   }
   if (!c.horas.comida.length && !c.horas.cena.length) throw new Error('Añade al menos una hora de reserva.')
   return c
@@ -645,5 +647,48 @@ function asignarReserva(val, rs) {
       fecha: d.fecha, hora: d.hora, turno: turnoDe(d.hora), personas: d.personas, notas: d.notas, mesa: mesa.id,
       origen: val.origen, estado: 'confirmada', asistencia: '', recordatorio: false, resena: false, ref: '',
     },
+  }
+}
+
+/* ----------------------------------------------------- aforo en vivo (cámara del local) */
+
+/** Lectura que envía la cámara: solo cifras, nunca imágenes. */
+function validarLectura(b) {
+  b = b || {}
+  const capacidad = entero(b.capacidad, 1, 5000, 0)
+  if (!capacidad) throw new Error('Falta el aforo máximo.')
+  return {
+    ocupacion: entero(b.ocupacion, 0, 5000, 0),
+    capacidad,
+    cola: entero(b.cola, 0, 500, 0),
+    espera: entero(b.espera, 0, 6 * 3600, 0),
+  }
+}
+
+/** Lo que se enseña en la web: solo si la lectura es reciente (menos de 5 minutos). */
+function aforoPublico(a, ahoraMs) {
+  if (!a || !a.ts) return { ok: true, hay: false }
+  const hace = Math.round((ahoraMs - Date.parse(a.ts)) / 1000)
+  if (!(hace >= 0 && hace < 300)) return { ok: true, hay: false }
+  const porcentaje = Math.min(100, Math.round((a.ocupacion / Math.max(1, a.capacidad)) * 100))
+  const nivel = porcentaje >= 95 ? 'lleno' : porcentaje >= 75 ? 'casi lleno' : porcentaje >= 40 ? 'animado' : 'tranquilo'
+  return { ok: true, hay: true, ocupacion: a.ocupacion, capacidad: a.capacidad, porcentaje, cola: a.cola, espera: a.espera, hace, nivel }
+}
+
+/** ¿Hay que avisar al encargado? Espera por encima del umbral y sin aviso en la última media hora. */
+function alertaCola(lectura, ultimaAlerta, ahoraMs) {
+  if (!CFG.colaUmbral || lectura.espera < CFG.colaUmbral * 60) return false
+  return !ultimaAlerta || ahoraMs - Date.parse(ultimaAlerta) > 30 * 60 * 1000
+}
+
+function emailAlertaCola(l) {
+  const min = Math.round(l.espera / 60)
+  return {
+    asunto: 'Cola de ' + l.cola + ' personas · ' + min + ' min de espera · ' + CFG.nombre,
+    html: emailHtml({
+      titulo: 'La cola se está alargando',
+      intro: 'La cámara del local marca <b>' + l.cola + ' personas en cola</b> con unos <b>' + min + ' minutos</b> de espera (aviso a partir de ' + CFG.colaUmbral + ' min). Aforo: ' + l.ocupacion + ' de ' + l.capacidad + '.<br><br>Quizá convenga abrir otra caja, reforzar la barra o avisar a la cola del tiempo de espera.',
+      botones: [{ texto: 'Ver la sala', url: SECRETOS.url + '/admin' }, { texto: 'Ver la cámara', url: SECRETOS.url + '/aforo', secundario: true }],
+    }),
   }
 }

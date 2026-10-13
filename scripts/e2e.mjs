@@ -12,7 +12,7 @@ const MAIL = 'http://localhost:8025/api/v1'
 const n = new N8n(N8N)
 await n.waitHealthy()
 await n.ensureOwnerAndLogin(env.N8N_ADMIN_EMAIL, env.N8N_ADMIN_PASSWORD)
-const T = { reservas: await n.ensureDataTable('reservas', []), espera: await n.ensureDataTable('lista_espera', []), clientes: await n.ensureDataTable('clientes', []) }
+const T = { reservas: await n.ensureDataTable('reservas', []), espera: await n.ensureDataTable('lista_espera', []), clientes: await n.ensureDataTable('clientes', []), contenido: await n.ensureDataTable('contenido', []) }
 
 let fallos = 0
 let pasos = 0
@@ -272,7 +272,24 @@ try {
   await sleep(4000)
   ok(!(await mails()).some((m) => m.To[0].Address === 'inaki@ejemplo.com'), 'No se le vuelve a escribir la semana siguiente')
 
-  console.log('10 · Recordatorio del día antes con confirmación de asistencia')
+  console.log('10 · Cámara del local: aforo en vivo y aviso de cola')
+  await n.rest('PATCH', `/projects/${n.project.id}/data-tables/${T.contenido}/rows`, { filter: { type: 'and', filters: [{ columnName: 'clave', condition: 'eq', value: 'aforo' }] }, data: { valor: '{}' } }).catch(() => {})
+  r = await http('POST', '/api/aforo', { ocupacion: 5, capacidad: 14, cola: 2, espera: 40 })
+  ok(r.status === 401, 'Sin la clave del restaurante no se aceptan lecturas', r.json)
+  r = await http('POST', '/api/aforo', { ocupacion: 5 }, ADMIN)
+  ok(r.status === 400, 'Una lectura sin aforo máximo se rechaza', r.json)
+  await fetch(`${MAIL}/messages`, { method: 'DELETE' })
+  r = await http('POST', '/api/aforo', { ocupacion: 5, capacidad: 14, cola: 2, espera: 40 }, ADMIN)
+  ok(r.status === 200 && r.json.alerta === false, 'La cámara publica una lectura normal sin avisar a nadie', r.json)
+  r = await http('GET', '/api/aforo')
+  ok(r.json?.hay && r.json.porcentaje === 36 && r.json.nivel === 'tranquilo' && r.json.cola === 2, 'La web pública ve el aforo: 36 %, tranquilo, 2 en cola', r.json)
+  r = await http('POST', '/api/aforo', { ocupacion: 13, capacidad: 14, cola: 9, espera: 900 }, ADMIN)
+  ok(r.json?.alerta === true, 'Con 15 minutos de espera se avisa al encargado', r.json)
+  ok(!!(await esperarMail((m) => m.Subject.startsWith('Cola de 9 personas'))), 'Llega el email de la cola larga')
+  r = await http('POST', '/api/aforo', { ocupacion: 13, capacidad: 14, cola: 9, espera: 960 }, ADMIN)
+  ok(r.json?.alerta === false, 'No se repite el aviso en la misma media hora', r.json)
+
+  console.log('11 · Recordatorio del día antes con confirmación de asistencia')
   await fetch(`${MAIL}/messages`, { method: 'DELETE' })
   await http('POST', '/tareas/recordatorios', { clave: env.REST_CLAVE_PANEL })
   ok(!!(await esperarMail((m) => m.To[0].Address === 'ana@ejemplo.com' && m.Subject.startsWith('Mañana te esperamos'))), 'Ana recibe el recordatorio')
@@ -285,7 +302,7 @@ try {
   r = await http('POST', '/reserva', new URLSearchParams({ t: anaAdm.token, accion: 'confirmar' }))
   ok(r.text.includes('Gracias por confirmar') && (await fila((x) => x.codigo === codigoAna)).asistencia === 'confirmada', 'Ana confirma asistencia con un clic')
 
-  console.log('11 · Informe diario y petición de reseña')
+  console.log('12 · Informe diario y petición de reseña')
   await http('POST', '/tareas/informe', { clave: env.REST_CLAVE_PANEL })
   const dueno = original.config.emailDueno || env.REST_EMAIL_DUENO
   ok(!!(await esperarMail((m) => m.To[0].Address === dueno && m.Subject.startsWith('Hoy:'))), 'El dueño recibe el informe diario')

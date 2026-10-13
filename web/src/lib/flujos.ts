@@ -21,6 +21,7 @@ export const FLUJOS: Flujo[] = [
   { id: '08', icono: '🌧️', nombre: 'Terraza según el tiempo', cuando: 'A las 10:00 y a las 17:00', hace: 'Consulta la previsión de lluvia. Si supera el umbral, pasa las reservas de terraza al salón y avisa a cada cliente.', ahorra: 'Recolocar mesas y llamar a todos cuando llueve', manual: true },
   { id: '09', icono: '🔪', nombre: 'Hoja de cocina', cuando: 'A las 12:00 y a las 19:00', hace: 'Manda a cocina los comensales por hora, las alergias por mesa y las celebraciones del turno.', ahorra: 'Sorpresas con alergias y tartas', manual: true },
   { id: '10', icono: '💌', nombre: 'Recuperar clientes', cuando: 'Los lunes a las 11:00', hace: 'Invita a volver a los clientes habituales que llevan tiempo sin venir, sin repetir.', ahorra: 'Perder clientes sin darse cuenta', manual: true },
+  { id: '11', icono: '📷', nombre: 'Aforo en vivo y aviso de cola', cuando: 'Cada 15 s, desde la cámara del local', hace: 'Recibe de la cámara solo cifras (aforo, cola y espera), las publica en la web y avisa al encargado si la espera pasa del umbral.', ahorra: 'Colas que espantan clientes sin que nadie se entere', manual: true },
 ]
 
 export const nombreFlujo = (id: string) => FLUJOS.find((f) => f.id === id)?.nombre ?? id

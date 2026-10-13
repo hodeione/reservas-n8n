@@ -68,14 +68,19 @@ export function Automatizaciones({ clave, onCambio }: { clave: string; onCambio:
               {ultima && <p className="mt-3 rounded-xl bg-crema p-2.5 text-xs">Última vez {hora(ultima.cuando)}: {ultima.resumen}</p>}
               <div className="mt-auto flex flex-wrap gap-2 pt-4">
                 {f.manual && (
-                  <button disabled={!!corriendo} onClick={() => lanzar(f.id)} className="rounded-full bg-tinta px-4 py-2 text-sm font-semibold text-crema disabled:opacity-50">
-                    {corriendo === f.id + '{}' ? 'Ejecutando…' : '▶ Ejecutar ahora'}
+                  <button disabled={!!corriendo} onClick={() => lanzar(f.id, f.id === '11' ? { ocupacion: 13, capacidad: 14, cola: 9, espera: 900 } : {})} className="rounded-full bg-tinta px-4 py-2 text-sm font-semibold text-crema disabled:opacity-50">
+                    {corriendo.startsWith(f.id) ? 'Ejecutando…' : f.id === '11' ? '▶ Simular cola larga' : '▶ Ejecutar ahora'}
                   </button>
                 )}
                 {f.id === '08' && (
                   <button disabled={!!corriendo} onClick={() => lanzar('08', { lluvia: 90 })} className="rounded-full bg-crema px-4 py-2 text-sm font-semibold ring-1 ring-linea disabled:opacity-50">
                     🌧️ Simular lluvia
                   </button>
+                )}
+                {f.id === '11' && (
+                  <a href="/aforo" className="rounded-full bg-crema px-4 py-2 text-sm font-semibold ring-1 ring-linea">
+                    📷 Abrir la cámara
+                  </a>
                 )}
                 {f.id === '09' &&
                   (['comida', 'cena'] as const).map((t) => (

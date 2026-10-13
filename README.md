@@ -7,7 +7,8 @@
 En la demo se puede usar todo:
 - **la web del cliente:** reserva eligiendo mesa y carta 3D,
 - **el panel del restaurante:** sala en vivo, plano, carta y horarios,
-- **las automatizaciones:** se lanzan a mano y se leen los emails que envían.
+- **las automatizaciones:** se lanzan a mano y se leen los emails que envían,
+- **la cámara del local:** aforo, cola y mapa de calor con visión artificial en el navegador.
 
 La demo ejecuta en el navegador la misma librería que usa n8n en producción.
 
@@ -40,6 +41,22 @@ El plato se detecta en 10–30 ms por fotograma, así que se sigue en tiempo rea
 
 Los créditos de cada escaneo están en `web/src/creditos-3d.json` y en la ficha de cada plato.
 
+## Cámara del local: aforo y colas con visión artificial
+
+Una webcam del local cuenta personas, mide la cola y el tiempo de espera y dibuja por dónde pasa la gente. Todo ocurre en el navegador: ninguna imagen sale del dispositivo, solo cifras anónimas. Taberna Luna las publica en su web («Ahora mismo: animado · 60 %») y en el panel, y n8n avisa al encargado si la cola se alarga.
+
+| Cola de la barra con tiempo de espera | Mapa de calor y entradas por la puerta | En la web del restaurante |
+|---|---|---|
+| ![Cola](docs/aforo-cola.png) | ![Mapa de calor](docs/aforo-calor.png) | ![Aforo en la web](docs/aforo-web.png) |
+
+Cómo funciona, en `web/src/aforo/`:
+1. **Detecta.** YOLOX-S (Megvii, Apache 2.0), convertido a media precisión, se ejecuta con ONNX Runtime Web sobre la GPU (WebGPU) a unos 25 ms por fotograma. En móviles o sin WebGPU usa YOLOX-Tiny en un hilo aparte.
+2. **Sigue.** Cada persona conserva su número entre fotogramas (predicción por velocidad y emparejamiento por solapamiento), así que se sabe cuánto lleva en la cola o si ha cruzado la puerta.
+3. **Mide.** Zonas de aforo, de cola y que no cuentan (por ejemplo, tras la barra), líneas de paso para entradas y salidas, y un mapa de calor de los recorridos. Las zonas se dibujan con el ratón sobre la imagen.
+4. **Actúa.** Cada 15 s la lectura va al flujo 11 de n8n, que la publica y avisa por email si la espera supera el umbral fijado en Ajustes, sin repetir el aviso en media hora.
+
+Se puede probar con tres vídeos de ejemplo (Pexels), con la webcam o con un vídeo propio, y difuminar a las personas en pantalla. En un local real hay que colocar el cartel de zona videovigilada.
+
 ## Para el restaurante, sin código
 
 | Reservas del día | Editor de la carta | Automatizaciones |
@@ -54,7 +71,7 @@ Los créditos de cada escaneo están en `web/src/creditos-3d.json` y en la ficha
 | **Automático** | Las diez automatizaciones, con su registro y un botón para lanzarlas. En la demo, además, la bandeja con todos los emails enviados. |
 | **Ajustes** | Días y horas, duración de cada turno, cierres, reglas de reserva, umbral de lluvia para la terraza, emails de dueño y cocina, y QR imprimible de la carta. |
 
-## Diez automatizaciones
+## Once automatizaciones
 
 | Flujo | Cuándo | Qué hace |
 |---|---|---|
@@ -68,6 +85,7 @@ Los créditos de cada escaneo están en `web/src/creditos-3d.json` y en la ficha
 | **08 · Terraza según el tiempo** | A las 10:00 y 17:00 | Consulta la previsión de Open-Meteo. Si la lluvia supera el umbral, pasa las reservas de terraza al salón, avisa a cada cliente y manda al dueño las que no caben. |
 | **09 · Hoja de cocina** | A las 12:00 y 19:00 | Comensales por hora, alergias por mesa y celebraciones del turno. |
 | **10 · Recuperar clientes** | Los lunes | Invita a volver a los clientes habituales que llevan tiempo sin venir, sin repetir. |
+| **11 · Aforo en vivo** | Cada 15 s, desde la cámara | Recibe solo cifras de la cámara del local, las publica en la web y avisa al encargado si la cola pasa del umbral. |
 
 ![Email de la terraza](docs/email-terraza.png)
 
@@ -78,9 +96,10 @@ flowchart LR
   C[Cliente: web, carta 3D y RA] --> CADDY
   A[Restaurante: /admin] --> CADDY
   IA[Recepcionista de IA] -->|API + clave| CADDY
+  CAM[Cámara del local · visión en el navegador] -->|solo cifras| CADDY
   subgraph Docker
     CADDY[Caddy · HTTPS] -->|/| WEB[Web React estática]
-    CADDY -->|/webhook| N8N[n8n · 10 flujos]
+    CADDY -->|/webhook| N8N[n8n · 11 flujos]
     N8N --> DT[(Data Tables<br/>reservas · espera · contenido · clientes)]
     DT --- PG[(PostgreSQL)]
   end
@@ -108,7 +127,7 @@ cp .env.example .env                       # y cambia las contraseñas y claves
 docker compose --profile dev up -d
 node scripts/build.mjs                     # genera workflows/*.json
 node scripts/setup.mjs                     # instala los flujos y los datos de muestra
-node scripts/e2e.mjs                       # 79 comprobaciones de principio a fin
+node scripts/e2e.mjs                       # 86 comprobaciones de principio a fin
 ```
 
 | Qué | Dirección |
@@ -125,7 +144,8 @@ La prueba de principio a fin recorre una semana real del restaurante:
 - reservas de la IA y del personal,
 - edición del plano, la carta y los ajustes,
 - terraza con lluvia y hoja de cocina con alergias y cumpleaños,
-- invitación a clientes que no vuelven, recordatorios, informe y reseñas.
+- invitación a clientes que no vuelven, recordatorios, informe y reseñas,
+- lecturas de la cámara, aforo público y aviso de cola sin repetir.
 
 Comprueba cada email recibido y cada dato guardado.
 

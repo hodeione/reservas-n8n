@@ -7,7 +7,7 @@ export function DemoBarra() {
   const ruta = useRuta()
   const [reiniciando, setReiniciando] = useState(false)
   if (!DEMO) return null
-  const vista = ruta.startsWith('/admin/automatizaciones') ? 'auto' : ruta.startsWith('/admin') ? 'admin' : 'cliente'
+  const vista = ruta.startsWith('/admin/automatizaciones') ? 'auto' : ruta.startsWith('/admin') ? 'admin' : ruta === '/aforo' ? 'camara' : 'cliente'
   const enlace = (href: string, id: string, texto: string, corto: string) => (
     <a
       href={href}
@@ -26,6 +26,7 @@ export function DemoBarra() {
         {enlace('/', 'cliente', 'Vista del cliente', 'Cliente')}
         {enlace('/admin', 'admin', 'Panel del restaurante', 'Restaurante')}
         {enlace('/admin/automatizaciones', 'auto', 'Automatizaciones y emails', 'Automatizaciones')}
+        {enlace('/aforo', 'camara', 'Cámara: aforo y colas', 'Cámara')}
         <button
           onClick={async () => {
             if (!confirm('¿Volver a empezar la demo con los datos de ejemplo?')) return
@@ -58,7 +59,8 @@ export function DemoBienvenida() {
           <li>🍽️ <b>Carta con platos reales en 3D.</b> Desde el móvil, apunta a un plato vacío y te lo sirve encima.</li>
           <li>🪑 <b>Reserva eligiendo mesa</b> en el plano del local.</li>
           <li>🧑‍🍳 <b>Panel del restaurante</b> sin código: sala en vivo, plano, carta y horarios.</li>
-          <li>⚙️ <b>Diez automatizaciones</b> de n8n: lánzalas y mira los emails que envían.</li>
+          <li>📷 <b>Cámara del local</b>: aforo, colas y mapa de calor con visión artificial en el navegador.</li>
+          <li>⚙️ <b>Once automatizaciones</b> de n8n: lánzalas y mira los emails que envían.</li>
         </ul>
         <p className="mt-4 text-xs text-gris">Los datos se guardan solo en tu navegador. Los emails no se envían de verdad: los verás en «Automatizaciones y emails».</p>
         <button onClick={cerrar} className="mt-6 w-full rounded-full bg-teja py-3.5 font-semibold text-white">

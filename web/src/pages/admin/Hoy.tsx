@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { AforoPanel } from '../../components/AforoEnVivo'
 import { Leyenda, Plano, type Aspecto } from '../../components/Plano'
 import { Campo, Contador, Modal, Tarjeta, entrada, useAviso } from '../../components/ui'
 import { api, type DatosAdmin, type Mesa, type Reserva } from '../../lib/api'
@@ -102,6 +103,8 @@ export function Hoy({ clave, datos, recargar }: Props) {
       </div>
 
       {datos.cerrado && <p className="rounded-2xl bg-oro/20 p-4 text-sm font-semibold">Este día el restaurante está cerrado ({datos.cerrado}). Puedes cambiarlo en Ajustes.</p>}
+
+      {fecha === datos.hoy && <AforoPanel />}
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {kpis.map(([k, v]) => (

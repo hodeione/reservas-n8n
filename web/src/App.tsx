@@ -10,6 +10,8 @@ import { Reservar } from './pages/Reservar'
 
 // El panel del restaurante se descarga solo cuando alguien entra en /admin.
 const Admin = lazy(() => import('./pages/admin/Admin').then((m) => ({ default: m.Admin })))
+// La demo de aforo por cámara (visión artificial) también se descarga aparte.
+const Aforo = lazy(() => import('./pages/Aforo').then((m) => ({ default: m.Aforo })))
 
 const Cargando = () => (
   <div className="flex min-h-screen items-center justify-center">
@@ -24,6 +26,14 @@ export default function App() {
       <Suspense fallback={<Cargando />}>
         <Admin />
         <DemoBienvenida />
+      </Suspense>
+    )
+  }
+  if (ruta === '/aforo') {
+    return (
+      <Suspense fallback={<Cargando />}>
+        <DemoBarra />
+        <Aforo />
       </Suspense>
     )
   }

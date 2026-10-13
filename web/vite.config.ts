@@ -8,5 +8,7 @@ export default defineConfig({
   // La demo importa la librería del backend (../src/lib.js) para ejecutarla en el navegador.
   // En la demo no hay backend: la API se atiende en el navegador.
   server: { proxy: process.env.VITE_DEMO === '1' ? {} : { '/webhook': 'http://localhost:5680' }, fs: { allow: ['..'] } },
+  // onnxruntime-web carga su motor wasm por URL relativa: no se debe preempaquetar.
+  optimizeDeps: { exclude: ['onnxruntime-web'] },
   build: { chunkSizeWarningLimit: 1500 },
 })

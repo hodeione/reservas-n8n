@@ -130,6 +130,15 @@ export function Ajustes({ clave, datos, onGuardado }: Props) {
             <Campo etiqueta={`Recoger la terraza si la lluvia supera el ${c.lluviaUmbral ?? 60} %`} ayuda="Las reservas de terraza pasan solas al salón y se avisa a cada cliente. 0 lo desactiva.">
               <input type="range" min={0} max={100} step={5} value={c.lluviaUmbral ?? 60} onChange={(e) => set('lluviaUmbral', Number(e.target.value))} className="w-full accent-teja" />
             </Campo>
+            <Campo etiqueta="Avisar si la espera en la cola pasa de" ayuda="Lo mide la cámara del local (página Aforo). 0 desactiva el aviso.">
+              <select value={c.colaUmbral ?? 10} onChange={(e) => set('colaUmbral', Number(e.target.value))} className={entrada}>
+                {[0, 5, 8, 10, 15, 20, 30].map((m) => (
+                  <option key={m} value={m}>
+                    {m ? `${m} minutos` : 'Nunca'}
+                  </option>
+                ))}
+              </select>
+            </Campo>
             <Campo etiqueta="Invitar a volver a los habituales tras" ayuda="Clientes que han venido al menos dos veces y llevan este tiempo sin reservar.">
               <select value={c.recuperarDias ?? 60} onChange={(e) => set('recuperarDias', Number(e.target.value))} className={entrada}>
                 {[0, 30, 45, 60, 90, 120, 180].map((d) => (
